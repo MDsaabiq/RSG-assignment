@@ -61,7 +61,7 @@ flowchart TD
     Router -->|Custom / novel question| Gen["3B. Text-to-SQL Node\n(Groq Qwen 2.5 + SQLite Schema)"]
 
     Gen --> Exec["4. Safety Check & Execution\n(Read-only connection + PRAGMA query_only)"]
-    Exec -->|Syntax error & retries < 2| Gen
+    Exec -->|"Syntax error (retries under 2)"| Gen
 
     Det --> Synth["5. Response Synthesis\n(Returns text answer + supporting data rows)"]
     Exec --> Synth
@@ -88,7 +88,41 @@ flowchart TD
 
 ---
 
-## 3. Automated Tests
+## 3. Supported Questions: Deterministic Benchmarks & Dynamic Queries
+
+The assistant supports two complementary question-handling modes:
+
+### A. The 5 Assessment Benchmark Questions (Deterministic Routing)
+These are routed directly to pre-compiled SQL functions in `database.py` to guarantee zero hallucination:
+
+| # | Question | Verified Result | Supporting Details |
+| :---: | :--- | :--- | :--- |
+| **Q1** | *What is the total revenue?* | **$1,439,200.00 Net Revenue** | Gross: $1,443,700.00; Discounts: $4,500.00; 48 completed transactions. |
+| **Q2** | *Which product generated the highest revenue?* | **'Monitor' ($473,000.00)** | 50 units sold across Electronics category (Desk 2nd: $222,500.00). |
+| **Q3** | *What is the monthly revenue trend?* | **6-Month Trend Analyzed** | Jan: $210,250 → Feb: $234,600 (+11.58%) → Mar: $223,900 (-4.56%) → Apr: $240,700 (+7.50%) → May: $318,500 (+32.32%) → Jun: $211,250 (-33.67%). |
+| **Q4** | *Which region generated the highest sales?* | **'South' ($411,200.00)** | 13 completed orders (North 2nd: $384,450.00; East 3rd: $346,700.00; West 4th: $296,850.00). |
+| **Q5** | *How did revenue change between two months?* | **+$24,350.00 (+11.58%)** | Jan 2026 ($210,250.00) vs Feb 2026 ($234,600.00). Supports arbitrary month pairs. |
+
+### B. Dynamic & Ad-Hoc Questions (LLM Text-to-SQL)
+When users ask novel questions outside the benchmark set, LangGraph passes the schema to Groq (`qwen/qwen3.8-27b`), writes safe SQLite queries, and returns structured data tables:
+
+- **Sales Channel Breakdown:**
+  - *Query:* *"Show sales breakdown by sales channel"*
+  - *SQL Generated:* `SELECT Sales_channel, SUM(Quantity) AS total_qty, SUM(net_revenue) AS total_rev FROM v_valid_sales GROUP BY Sales_channel ORDER BY total_rev DESC;`
+  - *Result:* Online ($746,750 / 353 units) vs Retail ($692,450 / 280 units).
+- **Category-Level Analysis:**
+  - *Query:* *"Which product category had the highest discount amount?"*
+  - *SQL Generated:* Groups by `Category` and sums `Discount_amount`.
+- **Top Individual Orders:**
+  - *Query:* *"List the top 3 transactions by units sold"*
+  - *SQL Generated:* `SELECT Transaction_Id, Product, Quantity, net_revenue FROM v_valid_sales ORDER BY Quantity DESC LIMIT 3;`
+- **Data Quality Audits:**
+  - *Query:* *"Show all flagged anomaly transactions"*
+  - *SQL Generated:* Queries `v_sales_anomalies` to inspect the 3 quarantined records.
+
+---
+
+## 4. Automated Tests
 
 Run all tests with:
 ```bash
@@ -104,7 +138,7 @@ The test suite contains **19 unit and integration tests** in `test_core.py`:
 
 ---
 
-## 4. AI Development Reflection
+## 5. AI Development Reflection
 
 ### Which AI tools I used
 - **GitHub Copilot**: Used for inline code completion, writing repetitive TypedDict schemas for LangGraph state, and drafting test assertion blocks.
