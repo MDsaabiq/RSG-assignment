@@ -95,33 +95,49 @@ Once the server or app is running, you can test open-ended questions to evaluate
 
 ```mermaid
 
+
 flowchart TD
-    User["User Question<br/>Streamlit or FastAPI"]
-    InputCheck["1. Input Validation<br/>Sanitize and validate input"]
+    A["User Question<br/>Streamlit / FastAPI"]
+    B["1. Input Validation<br/>Sanitize user input"]
+    C{"Benchmark<br/>match?"}
 
-    Router{"Deterministic<br/>benchmark question?"}
+    D["2A. Deterministic Path<br/>Verified SQL queries"]
+    E["2B. AI Path<br/>Groq Text-to-SQL"]
 
-    FastTrack["2A. Deterministic Path<br/>Execute verified SQL"]
+    F["3. SQL Safety Guard<br/>Read-only + table allowlist"]
+    G["4. Database<br/>SQLite execution"]
+    H["5. Final Answer<br/>Summary + supporting data"]
 
-    AIQuery["2B. AI Path<br/>Groq Text-to-SQL"]
+    A --> B
+    B --> C
+    C -->|Yes| D
+    C -->|No| E
+    D --> F
+    E --> F
+    F --> G
+    G --> H
 
-    SafetyCheck["3. SQL Safety Guard<br/>Validate SQL and enforce read-only access"]
+    classDef start fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px
+    classDef process fill:#F1F5F9,stroke:#64748B,color:#0F172A,stroke-width:2px
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    classDef deterministic fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
+    classDef ai fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    classDef security fill:#FFE4E6,stroke:#E11D48,color:#881337,stroke-width:2px
+    classDef database fill:#CCFBF1,stroke:#0F766E,color:#134E4A,stroke-width:2px
+    classDef output fill:#E0E7FF,stroke:#4F46E5,color:#312E81,stroke-width:2px
 
-    Execute["4. Execute Query<br/>Retrieve database results"]
+    class A start
+    class B process
+    class C decision
+    class D deterministic
+    class E ai
+    class F security
+    class G database
+    class H output
 
-    Answer["5. Final Answer<br/>Summary and supporting data"]
+    linkStyle 2 stroke:#16A34A,stroke-width:2px
+    linkStyle 3 stroke:#7C3AED,stroke-width:2px
 
-    User --> InputCheck
-    InputCheck --> Router
-
-    Router -->|Yes| FastTrack
-    Router -->|No| AIQuery
-
-    FastTrack --> Execute
-    AIQuery --> SafetyCheck
-    SafetyCheck --> Execute
-
-    Execute --> Answer
 
 ```
 
