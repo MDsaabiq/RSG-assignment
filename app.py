@@ -8,6 +8,7 @@ and execution source citations (Direct Verified SQL vs Dynamic LLM Text-to-SQL).
 """
 
 import os
+import threading
 import httpx
 import streamlit as st
 import pandas as pd
@@ -20,6 +21,30 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
+
+
+def _wake_backend():
+    """Background worker that pings the Render backend to wake it from spin-down."""
+    try:
+        httpx.get(f"{BACKEND_API_URL}/health", timeout=60.0)
+    except Exception:
+        pass
+
+
+# Automatically wake up Render on app startup / page visit without blocking UI
+if "backend_woken" not in st.session_state:
+    st.session_state["backend_woken"] = True
+    threading.Thread(target=_wake_backend, daemon=True).start()
+
+
+@st.cache_data(ttl=30)
+def get_service_status() -> bool:
+    """Quick check for live backend status with short timeout."""
+    try:
+        resp = httpx.get(f"{BACKEND_API_URL}/health", timeout=3.0)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 def get_citation(source: str) -> str:
@@ -111,6 +136,10 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🌐 Service Status")
+    if get_service_status():
+        st.success("Backend: Online & Ready", icon="🟢")
+    else:
+        st.info("Backend: Waking up from idle...", icon="⏳")
     st.markdown(f"**Backend API:** [Render Swagger UI]({BACKEND_API_URL}/docs)")
 
 
@@ -118,7 +147,7 @@ with st.sidebar:
 # Main Chat Area
 # ==============================================================================
 
-st.title("🤖 Sales Business Intelligence Assistant")
+st.title(" Sales Business Intelligence Assistant")
 st.markdown(
     "Ask natural language questions about your sales data. "
     "All queries are verified against the relational database with deterministic mathematical grounding."
