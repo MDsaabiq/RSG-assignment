@@ -140,7 +140,7 @@ with st.sidebar:
         st.success("Backend: Online & Ready", icon="🟢")
     else:
         st.info("Backend: Waking up from idle...", icon="⏳")
-    st.markdown(f"**Backend API:** [Render Swagger UI]({BACKEND_API_URL}/docs)")
+    st.markdown(f"**Backend API:** [FastAPI Cloud Service]({BACKEND_API_URL})")
 
 
 # ==============================================================================

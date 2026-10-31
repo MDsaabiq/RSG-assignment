@@ -25,32 +25,25 @@ A simple AI-powered Business Intelligence tool that lets you ask questions about
 
 ---
 
-## 1. Quick Setup & Run
+## 🚀 Live Interactive Demo (Start Here!)
 
-### Try the deployed API first
+Skip the local setup — the entire assistant is live and interactive in your browser right now:
 
-You can test the deployed FastAPI service without installing the project or
-configuring a local Groq API key:
+👉 **[Sales BI Assistant · Streamlit](https://mdsaabiq-rsg-assignment-app-dhfsqc.streamlit.app/)** 👈
 
-**[Open the live Swagger UI](https://rsg-assignment.onrender.com/docs)**
+> [!IMPORTANT]
+> **Click the link above to test immediately!**  
+> You do **not** need to clone the repository, install Python packages, or enter a Groq API key. The deployed web interface includes:
+> - One-click selection for all **5 Challenge Benchmark Questions**.
+> - Live chat input for **custom dynamic sales queries** (e.g. sales channels, anomalies, order quantities).
+> - Complete inspectability: verified SQL queries, execution method citations, and supporting data tables.
+> - Automatic backend wake-up connected to the live cloud API.
 
-In Swagger UI:
+---
 
-1. Expand **POST `/query`**.
-2. Select **Try it out**.
-3. Enter this request body:
+## 💻 Local Setup & Execution (Optional)
 
-   ```json
-   {
-     "question": "What is the total revenue?"
-   }
-   ```
-
-4. Select **Execute** to view the structured answer, supporting data, and
-   execution details.
-
-You can also test the other benchmark questions or enter a custom sales
-question. The deployed service already has its `GROQ_API_KEY` configured.
+If you prefer to clone and run the application locally on your machine:
 
 ### Setup
 ```bash
@@ -254,7 +247,7 @@ pytest -v test_core.py
 ```
 
 The tests are API-first: the main user-facing behavior is tested through the
-same `POST /query` endpoint exposed by FastAPI and Swagger UI.
+same `POST /query` endpoint exposed by the FastAPI backend.
 
 The 10 focused tests cover:
 
@@ -267,8 +260,8 @@ The 10 focused tests cover:
 
 The custom-question test mocks only the external Groq call. This keeps the
 automated suite deterministic and key-free while still testing the complete
-API-to-agent-to-database execution path. The live deployed endpoint can be
-tested separately through the [Render Swagger UI](https://rsg-assignment.onrender.com/docs).
+API-to-agent-to-database execution path. The live cloud backend can also be
+interacted with directly via the [Streamlit Web App](https://mdsaabiq-rsg-assignment-app-dhfsqc.streamlit.app/).
 
 ---
 
