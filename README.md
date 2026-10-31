@@ -115,7 +115,7 @@ Once the server or app is running, you can test open-ended questions to evaluate
 flowchart TD
     A["User Question<br/>Streamlit / FastAPI"]
     B["1. Input Validation<br/>Clean query"]
-    C{"Benchmark?"}
+    C{"Routing"}
 
     D["2A. Deterministic<br/>Verified SQL"]
     E["2B. AI Path<br/>Groq Text-to-SQL"]
