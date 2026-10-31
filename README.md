@@ -95,13 +95,13 @@ Once the server or app is running, you can test open-ended questions to evaluate
 
 ```mermaid
 flowchart TD
-    User["👤 User Question<br/>Web Chat or API"]
-    InputCheck["🛡️ 1. Validation<br/>Null & empty guard"]
-    Router{"🎯 Benchmark<br/>Q1 - Q5?"}
-    FastTrack["⚡ 2A. Benchmark Tool<br/>Pre-written SQL"]
-    AIQuery["🤖 2B. Text-to-SQL<br/>Groq dynamic query"]
-    SafetyCheck["🔒 3. Read-Only Guard<br/>PRAGMA query_only"]
-    Answer["📊 4. Final Answer<br/>Summary & data table"]
+    User["User Question<br/>Web or API"]
+    InputCheck["1. Input Check<br/>Sanitize input"]
+    Router{"Benchmark<br/>Q1 - Q5?"}
+    FastTrack["2A. Benchmark<br/>Verified SQL"]
+    AIQuery["2B. Text-to-SQL<br/>Groq query"]
+    SafetyCheck["3. Safety Guard<br/>Read-only mode"]
+    Answer["4. Final Answer<br/>Data and table"]
 
     User --> InputCheck
     InputCheck --> Router
