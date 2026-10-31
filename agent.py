@@ -325,7 +325,27 @@ def execute_and_synthesize_node(state: AgentState) -> Dict[str, Any]:
     client = get_groq_client()
     summary_answer = f"Query executed successfully with {len(rows)} result(s)."
 
-    if client and rows:
+    if not rows:
+        # Check if the user asked about a transaction that was flagged as an anomaly
+        txn_match = re.search(r"\b(TXN\d+)\b", f"{state.get('cleaned_query')} {sql}", re.IGNORECASE)
+        if txn_match:
+            txn_id = txn_match.group(1).upper()
+            anomaly_check = database.execute_safe_query(
+                f"SELECT Transaction_Id, Product, Quantity, Unit_price, Status, data_quality_flag FROM v_sales_anomalies WHERE Transaction_Id = '{txn_id}'"
+            )
+            if anomaly_check.get("success") and anomaly_check.get("rows"):
+                anom = anomaly_check["rows"][0]
+                flag = anom.get("data_quality_flag")
+                summary_answer = (
+                    f"Transaction {txn_id} ({anom.get('Product')}) has no valid revenue because it was flagged as an anomaly ({flag}). "
+                    f"Details: Quantity={anom.get('Quantity')}, Unit_price={anom.get('Unit_price')}, Status='{anom.get('Status')}'."
+                )
+                rows = anomaly_check["rows"]
+                columns = anomaly_check.get("columns", [])
+        else:
+            summary_answer = "No matching records found in valid completed sales."
+
+    elif client and rows:
         synth_prompt = f"""
 You are a business intelligence assistant. Summarize the answer to the user's question
 based strictly on the database query result below.

@@ -218,3 +218,12 @@ def test_api_post_query_bad_request():
     payload = {"question": ""}
     response = api_client.post("/query", json=payload)
     assert response.status_code == 400
+
+
+def test_anomalous_transaction_explanation():
+    """Verifies that querying an anomalous transaction explains the reason instead of returning an empty answer."""
+    res = process_user_query("what is revenue for TXN0034 Keyboard?")
+    assert res.get("status") == "success"
+    assert "TXN0034" in res.get("answer", "")
+    assert "ZERO_QUANTITY" in res.get("answer", "")
+    assert len(res.get("supporting_data", [])) > 0

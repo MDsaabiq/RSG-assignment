@@ -8,6 +8,31 @@ Built with Python, SQLite, LangGraph, FastAPI, and Streamlit.
 
 ## 1. Quick Setup & Run
 
+### Try the deployed API first
+
+You can test the deployed FastAPI service without installing the project or
+configuring a local Groq API key:
+
+**[Open the live Swagger UI](https://rsg-assignment.onrender.com/docs)**
+
+In Swagger UI:
+
+1. Expand **POST `/query`**.
+2. Select **Try it out**.
+3. Enter this request body:
+
+   ```json
+   {
+     "question": "What is the total revenue?"
+   }
+   ```
+
+4. Select **Execute** to view the structured answer, supporting data, and
+   execution details.
+
+You can also test the other benchmark questions or enter a custom sales
+question. The deployed service already has its `GROQ_API_KEY` configured.
+
 ### Setup
 ```bash
 # 1. Activate your virtual environment
@@ -44,6 +69,25 @@ GROQ_API_KEY=your_key_here
   ```bash
   pytest -v test_core.py
   ```
+
+### Quick Test Queries for Dynamic LLM Testing
+Once the server or app is running, you can test open-ended questions to evaluate the dynamic Text-to-SQL integration:
+
+- **Data Quality & Anomaly Inspection:**
+  ```json
+  {
+    "question": "List all returned or anomalous transactions."
+  }
+  ```
+  *Result:* The agent queries `v_sales_anomalies` and returns the 3 flagged records (1 returned, 1 zero quantity, 1 missing price) with reasons.
+
+- **Sales Channel Performance:**
+  ```json
+  {
+    "question": "Compare online and retail revenue."
+  }
+  ```
+  *Result:* The agent generates a `GROUP BY Sales_channel` query showing Online ($746,750 / 353 units) vs Retail ($692,450 / 280 units).
 
 ---
 
@@ -131,6 +175,14 @@ You can also ask arbitrary questions. The AI writes custom read-only SQL:
   $\rightarrow$ Returns the top 3 rows ordered by `Quantity DESC`.
 - *"Show all bad or returned transactions"*  
   $\rightarrow$ Queries `v_sales_anomalies` to show the 3 flagged records (1 returned, 1 zero quantity, 1 missing price).
+
+### C. Handling Missing & Anomalous Records
+When a user asks about a specific anomalous transaction (like `TXN0034` with 0 quantity or `TXN0051` with missing unit price), the agent doesn't just return an empty response ("0 results"). It cross-checks `v_sales_anomalies` and explicitly explains *why* it has no valid revenue:
+
+- **Example Query:** `"what is revenue for TXN0034 Keyboard?"`  
+  $\rightarrow$ **Agent Answer:** *"Transaction TXN0034 (Keyboard) has no valid revenue because it was flagged as an anomaly (ZERO_QUANTITY). Details: Quantity=0, Unit_price=900.0, Status='Completed'."*
+  $\rightarrow$ **Supporting Data:** Returns the anomaly record showing `data_quality_flag: ZERO_QUANTITY`.
+- **Example Query:** Asking about `TXN0051` (Laptop Stand) similarly reports that unit price was missing (`MISSING_UNIT_PRICE`).
 
 ---
 
