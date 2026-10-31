@@ -1,0 +1,16 @@
+streamlit
+pandas
+numpy
+boto3
+httpx
+pydantic
+python-dotenv
+groq
+google-genai
+langchain
+langchain-core
+langgraph
+# llama-index-core
+pytest
+pymupdf
+fastapi
