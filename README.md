@@ -95,20 +95,20 @@ Once the server or app is running, you can test open-ended questions to evaluate
 
 ```mermaid
 flowchart TD
-    User["👤 User Question<br/><i>(Web Chat or REST API)</i>"]
-    InputCheck["🛡️ 1. Input Validation<br/><i>(Null, empty, injection check)</i>"]
-    Router{"🎯 Matches Benchmark<br/>Q1 - Q5?"}
-    FastTrack["⚡ 2A. Deterministic SQL<br/><i>(100% exact math, zero hallucination)</i>"]
-    AIQuery["🤖 2B. Text-to-SQL (Groq)<br/><i>(Dynamic schema-grounded query)</i>"]
-    SafetyCheck["🔒 3. Read-Only Guard<br/><i>(mode=ro & PRAGMA query_only)</i>"]
-    Answer["📊 4. Response Synthesis<br/><i>(Natural answer + data table)</i>"]
+    User["👤 User Question<br/>Web Chat or API"]
+    InputCheck["🛡️ 1. Validation<br/>Null & empty guard"]
+    Router{"🎯 Benchmark<br/>Q1 - Q5?"}
+    FastTrack["⚡ 2A. Benchmark Tool<br/>Pre-written SQL"]
+    AIQuery["🤖 2B. Text-to-SQL<br/>Groq dynamic query"]
+    SafetyCheck["🔒 3. Read-Only Guard<br/>PRAGMA query_only"]
+    Answer["📊 4. Final Answer<br/>Summary & data table"]
 
     User --> InputCheck
     InputCheck --> Router
-    Router -->|Yes: Q1-Q5| FastTrack
-    Router -->|No: Custom| AIQuery
+    Router -->|Yes| FastTrack
+    Router -->|No| AIQuery
     AIQuery --> SafetyCheck
-    SafetyCheck -.->|Syntax retry| AIQuery
+    SafetyCheck -.->|Retry| AIQuery
     FastTrack --> Answer
     SafetyCheck --> Answer
 
@@ -142,14 +142,8 @@ This sounds like a normal data cleaning request, but it can deceive an LLM into 
 
 If security only relied on the LLM's prompt, deceptive questions could bypass it. That is why we enforce **hard connection-level rules**:
 
-### 1. What is PRAGMA and Connection-Level Rules?
-`PRAGMA` is an internal SQLite configuration command. In our database execution engine, every query runs through:
-```python
-conn.execute("PRAGMA query_only = ON;")
-```
-This is a **connection rule** that tells the SQLite engine itself to lock that specific session into read-only mode. Even if a deceptive prompt tricks the LLM into generating a `DROP` or `DELETE` command, SQLite's C-engine immediately refuses to execute it and throws an error: `attempt to write a readonly database`.
 
-### 2. Read-Only SQLite Connection (`mode=ro`)
+### 1. Read-Only SQLite Connection (`mode=ro`)
 When opening the database connection for queries, we pass `mode=ro` in the URI:
 ```python
 uri = f"file:///{db_path}?mode=ro"
@@ -157,7 +151,7 @@ conn = sqlite3.connect(uri, uri=True)
 ```
 This denies write permissions at the operating system and file level as defense in depth.
 
-### 3. Table Whitelisting & Keyword Blocking
+### 2. Table Whitelisting & Keyword Blocking
 - **Table Whitelist:** Queries can ONLY access `sales`, `v_valid_sales`, or `v_sales_anomalies`. Any query attempting to access internal schemas (like `sqlite_master`) is blocked before running.
 - **Blocked Keywords:** Commands like `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, and user `PRAGMA` calls are rejected.
 - **No Multi-Statements:** Commands separated by semicolons (e.g., `SELECT 1; DROP TABLE sales;`) are rejected.
@@ -196,7 +190,6 @@ When a user asks about a specific anomalous transaction (like `TXN0034` with 0 q
   $\rightarrow$ **Agent Answer:** *"Transaction TXN0034 (Keyboard) has no valid revenue because it was flagged as an anomaly (ZERO_QUANTITY). Details: Quantity=0, Unit_price=900.0, Status='Completed'."*
   $\rightarrow$ **Supporting Data:** Returns the anomaly record showing `data_quality_flag: ZERO_QUANTITY`.
 - **Example Query:** Asking about `TXN0051` (Laptop Stand) similarly reports that unit price was missing (`MISSING_UNIT_PRICE`).
-
 ---
 
 ## 5. Automated Tests (10 Tests Passing)
@@ -238,7 +231,7 @@ tested separately through the [Render Swagger UI](https://rsg-assignment.onrende
 - In the actual app, I only let the LLM handle understanding English questions. I did NOT let the LLM do math. All math is done by SQL in the database so answers are always 100% accurate.
 
 ### Problems I Faced & How I Fixed Them
-1. **Blank answers with reasoning models:** I tested with `openai/gpt-oss-20b`, but it used up all its tokens on internal thinking steps and returned empty SQL. Switching to Qwen solved this.
+1. **Blank answers with reasoning models:** I tested with `openai/gpt-oss-20b`, but it used up all its tokens on internal thinking steps and returned empty SQL. Switching to Qwen and max iteration limites solved this.
 2. **Bad data in the CSV:** The raw CSV had 3 problematic rows (TXN0033 was returned, TXN0034 had 0 quantity, and TXN0051 had no price). If you just ran `SUM(price * quantity)`, the totals were wrong. I fixed this by creating `clean.py` and an SQLite view `v_valid_sales` that only includes valid, completed sales.
 3. **Streamlit reloading database repeatedly:** At first, `database.init_db()` ran on every click in Streamlit, re-reading the CSV and writing to disk every time. I fixed it by caching the setup with `@st.cache_resource` and adding a check so it skips re-creating the database if it already exists.
 4. **Database errors showing as success:** Early on, if the database threw an error on a question, the router returned an empty string but marked the status as success. I wrote a `_format_db_response()` helper that checks `db_res.get("success")` and forwards the real error to the user.
