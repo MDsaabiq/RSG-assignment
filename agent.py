@@ -296,7 +296,7 @@ based strictly on the database query result below.
 
 Question: {question}
 SQL Query Used: {sql}
-Database Result Rows: {rows[:10]}
+Database Result Rows: {rows}
 
 Rules:
 - State the key finding clearly and directly.
