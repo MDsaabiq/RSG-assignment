@@ -95,19 +95,34 @@ Once the server or app is running, you can test open-ended questions to evaluate
 
 ```mermaid
 
-%%{init: {"theme":"base","themeVariables":{"fontSize":"14px","fontFamily":"Arial"},"flowchart":{"nodeSpacing":35,"rankSpacing":45,"curve":"basis"}}}%%
+
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Arial",
+    "fontSize": "14px",
+    "lineColor": "#CBD5E1",
+    "textColor": "#E5E7EB",
+    "edgeLabelBackground": "#1F2937"
+  },
+  "flowchart": {
+    "nodeSpacing": 40,
+    "rankSpacing": 40,
+    "curve": "basis"
+  }
+}}%%
 
 flowchart TD
-    A["User Question<br/>UI / API"]
-    B["1. Input Check<br/>Clean query"]
-    C{"Core<br/>question?"}
+    A["User Question<br/>Streamlit / FastAPI"]
+    B["1. Input Validation<br/>Clean query"]
+    C{"Benchmark?"}
 
-    D["2A. Fixed SQL<br/>Exact results"]
-    E["2B. AI SQL<br/>Groq generates"]
+    D["2A. Deterministic<br/>Verified SQL"]
+    E["2B. AI Path<br/>Groq Text-to-SQL"]
 
-    F["3. SQL Guard<br/>Read-only checks"]
-    G["4. SQLite<br/>Run query"]
-    H["5. Answer<br/>Text + data"]
+    F["3. SQL Safety<br/>Read-only checks"]
+    G["4. SQLite<br/>Execute query"]
+    H["5. Final Answer<br/>Summary + data"]
 
     A --> B
     B --> C
@@ -135,6 +150,10 @@ flowchart TD
     class F security
     class G database
     class H output
+
+    linkStyle 0,1,4,5,6,7 stroke:#CBD5E1,stroke-width:2px
+    linkStyle 2 stroke:#22C55E,stroke-width:2.5px
+    linkStyle 3 stroke:#A78BFA,stroke-width:2.5px
 
 
 ```
