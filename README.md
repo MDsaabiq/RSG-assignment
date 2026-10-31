@@ -1,169 +1,175 @@
 # Sales BI Assistant
 
-A mini natural language business intelligence assistant that allows users to ask questions about sales data and receive answers backed by verified database queries. Built with SQLite, LangGraph, FastAPI, and Streamlit.
+A simple AI-powered Business Intelligence tool that lets you ask questions about sales data in plain English and gets back real numbers from an SQLite database.
+
+Built with Python, SQLite, LangGraph, FastAPI, and Streamlit.
 
 ---
 
-## 1. Setup & How to Run
+## 1. Quick Setup & Run
 
-### Prerequisites
-- Python 3.10+ (tested on Python 3.13)
-- Windows / macOS / Linux
-
-### Installation
+### Setup
 ```bash
-# 1. Activate virtual environment
+# 1. Activate your virtual environment
 .\venv\Scripts\activate          # Windows PowerShell
 # source venv/bin/activate       # Mac/Linux
 
-# 2. Install dependencies
+# 2. Install packages
 pip install -r requirements.txt
 ```
 
-### Environment Configuration
-Make sure you have a `.env` file in the root folder with your Groq key:
+Make sure you have a `.env` file in the project root with your Groq API key:
 ```ini
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_key_here
 ```
 
-### Running the Components
+### Running the Project
 
-- **Streamlit Web UI (Recommended for manual testing):**
+- **Streamlit Web App (Easiest way to test):**
   ```bash
   streamlit run app.py
   ```
-  Opens at `http://localhost:8501`. Features quick buttons for all 5 benchmark questions, chat history, tabular data views, and SQL inspection.
+  Open `http://localhost:8501`. You will see quick-click buttons for the 5 challenge questions, a chat box for custom questions, and data tables with SQL details.
 
-- **FastAPI REST Server:**
+- **FastAPI Server:**
   ```bash
   python api.py
   ```
-  Runs at `http://localhost:8000`. Test via curl or Postman:
+  Runs on `http://localhost:8000`. You can send POST requests to `/query`:
   ```bash
   curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d "{\"question\": \"What is the total revenue?\"}"
   ```
 
-- **Automated Tests:**
+- **Run Tests:**
   ```bash
   pytest -v test_core.py
   ```
 
 ---
 
-## 2. Architecture & Flow
+## 2. How the System Works (Architecture)
 
 ```mermaid
 flowchart TD
-    User["User Query\n(Streamlit or FastAPI)"] --> Val["1. Input Validation Node\n(Empty string, null, and SQL injection checks)"]
-    Val --> Router{"2. Intent Router Node"}
+    User["User Question\n(Chat or API)"] --> InputCheck["1. Check Input\n(Empty, Null, Injection guards)"]
+    InputCheck --> Router{"2. Is it one of the 5 benchmark questions?"}
 
-    Router -->|Matches 5 challenge questions| Det["3A. Deterministic SQL Tools\n(100% exact math, zero hallucination)"]
-    Router -->|Custom / novel question| Gen["3B. Text-to-SQL Node\n(Groq Qwen 2.5 + SQLite Schema)"]
+    Router -->|Yes| FastTrack["3A. Deterministic Tool\n(Pre-written SQL, 100% accurate)"]
+    Router -->|No, custom question| AIQuery["3B. Text-to-SQL with Groq\n(Writes read-only SQL from schema)"]
 
-    Gen --> Exec["4. Safety Check & Execution\n(Read-only connection + PRAGMA query_only)"]
-    Exec -->|"Syntax error (retries under 2)"| Gen
+    AIQuery --> SafetyCheck["4. SQL Safety Check\n(Read-only mode, table whitelist)"]
+    SafetyCheck -->|"Syntax Error (retries under 2)"| AIQuery
 
-    Det --> Synth["5. Response Synthesis\n(Returns text answer + supporting data rows)"]
-    Exec --> Synth
+    FastTrack --> Answer["5. Format Final Answer\n(Summary text + data table + SQL used)"]
+    SafetyCheck --> Answer
 ```
 
-### System Layers
-1. **Data Management (`clean.py`, `database.py`)**:
-   - `clean.py` parses raw dates into `YYYY-MM-DD` and `YYYY-MM`, handles numeric coercion, computes gross/net revenue, and flags data anomalies.
-   - `database.py` creates `sales.db` with two views:
-     - `v_valid_sales`: Contains 48 valid completed transactions. All standard metrics query this view.
-     - `v_sales_anomalies`: Isolates 3 flagged records (returned items, zero quantity, missing unit price).
-   - SQL queries run through `get_readonly_connection()` using SQLite `mode=ro` URI and `PRAGMA query_only = ON`.
-
-2. **Agent Workflow (`agent.py`)**:
-   - Built as a state machine using LangGraph (`StateGraph`).
-   - Node 1 validates inputs against nulls, whitespace, and injection keywords.
-   - Node 2 routes core benchmark questions directly to deterministic database queries.
-   - For novel queries, Node 3 prompts Groq (`qwen/qwen3.8-27b`) with the schema to write safe SQL.
-   - Node 4 validates the query against an allowed table list (`sales`, `v_valid_sales`, `v_sales_anomalies`) and executes it. If SQLite returns a syntax error, it feeds it back to the LLM to self-heal (up to 2 retries).
-
-3. **Interfaces (`app.py`, `api.py`)**:
-   - `api.py`: FastAPI backend with `POST /query`, `GET /health`, and `GET /schema`.
-   - `app.py`: Streamlit frontend with conversation state, supporting data tables, and sidebar controls.
+### In Plain English:
+1. **Input Check:** Rejects empty queries, whitespace, or obvious injection attempts like `drop table`.
+2. **Intent Routing:** If you ask one of the 5 main questions (like *"What is the total revenue?"*), it calls a pre-written, verified SQL function. This guarantees zero AI math hallucination.
+3. **Dynamic Text-to-SQL:** If you ask a custom question (like *"Which sales channel is better?"*), the LLM reads the database schema and writes a SQL query.
+4. **Execution & Answer:** The query runs on SQLite, and the user gets a plain English answer along with the raw data table.
 
 ---
 
-## 3. Supported Questions: Deterministic Benchmarks & Dynamic Queries
+## 3. SQL Safety & Database Protection
 
-The assistant supports two complementary question-handling modes:
+To make sure the AI never deletes data or breaks the database, we use **multiple layers of protection**:
 
-### A. The 5 Assessment Benchmark Questions (Deterministic Routing)
-These are routed directly to pre-compiled SQL functions in `database.py` to guarantee zero hallucination:
+1. **Read-Only SQLite Connection (`mode=ro`):**
+   When executing queries, the database is opened with URI `mode=ro`:
+   ```python
+   uri = f"file:///{db_path}?mode=ro"
+   conn = sqlite3.connect(uri, uri=True)
+   ```
+   At the operating system level, write permissions are denied.
 
-| # | Question | Verified Result | Supporting Details |
+2. **PRAGMA query_only = ON:**
+   Right after connecting, we run:
+   ```python
+   conn.execute("PRAGMA query_only = ON;")
+   ```
+   This tells the SQLite engine itself to immediately block any write, delete, update, or create commands.
+
+3. **Restricted Table Whitelist:**
+   The validator checks that queries can ONLY access allowed tables/views:
+   - `sales`
+   - `v_valid_sales`
+   - `v_sales_anomalies`
+   Any query trying to access internal tables (like `sqlite_master`) or other tables is blocked before running.
+
+4. **Blocked Keywords:**
+   Commands like `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, and `TRUNCATE` are blocked.
+
+5. **No Multi-Statements:**
+   Queries with multiple statements separated by semicolons (e.g., `SELECT 1; DROP TABLE sales;`) are rejected.
+
+---
+
+## 4. Questions Supported: Benchmark & Dynamic
+
+### A. The 5 Benchmark Questions (Deterministic)
+These 5 questions are calculated directly using clean SQL on `v_valid_sales` (excluding returned orders and broken records):
+
+| # | Question | Answer / Result | Details |
 | :---: | :--- | :--- | :--- |
-| **Q1** | *What is the total revenue?* | **$1,439,200.00 Net Revenue** | Gross: $1,443,700.00; Discounts: $4,500.00; 48 completed transactions. |
-| **Q2** | *Which product generated the highest revenue?* | **'Monitor' ($473,000.00)** | 50 units sold across Electronics category (Desk 2nd: $222,500.00). |
-| **Q3** | *What is the monthly revenue trend?* | **6-Month Trend Analyzed** | Jan: $210,250 → Feb: $234,600 (+11.58%) → Mar: $223,900 (-4.56%) → Apr: $240,700 (+7.50%) → May: $318,500 (+32.32%) → Jun: $211,250 (-33.67%). |
-| **Q4** | *Which region generated the highest sales?* | **'South' ($411,200.00)** | 13 completed orders (North 2nd: $384,450.00; East 3rd: $346,700.00; West 4th: $296,850.00). |
-| **Q5** | *How did revenue change between two months?* | **+$24,350.00 (+11.58%)** | Jan 2026 ($210,250.00) vs Feb 2026 ($234,600.00). Supports arbitrary month pairs. |
+| **Q1** | *What is the total revenue?* | **$1,439,200.00** | Net revenue from 48 completed sales (Gross: $1,443,700, Discounts: $4,500). |
+| **Q2** | *Which product generated the highest revenue?* | **Monitor ($473,000.00)** | 50 units sold. (Desk was #2 with $222,500). |
+| **Q3** | *What is the monthly revenue trend?* | **6 Months Tracked** | Jan: $210,250 → Feb: $234,600 (+11.58%) → Mar: $223,900 (-4.56%) → Apr: $240,700 (+7.50%) → May: $318,500 (+32.32%) → Jun: $211,250 (-33.67%). |
+| **Q4** | *Which region generated the highest sales?* | **South ($411,200.00)** | 13 orders. (North was #2 with $384,450). |
+| **Q5** | *How did revenue change between two months?* | **+$24,350.00 (+11.58%)** | Comparing Jan 2026 ($210,250) to Feb 2026 ($234,600). Works for any two months. |
 
-### B. Dynamic & Ad-Hoc Questions (LLM Text-to-SQL)
-When users ask novel questions outside the benchmark set, LangGraph passes the schema to Groq (`qwen/qwen3.8-27b`), writes safe SQLite queries, and returns structured data tables:
+### B. Dynamic Questions (Custom Inquiries)
+You can also ask arbitrary questions. The AI writes custom read-only SQL:
 
-- **Sales Channel Breakdown:**
-  - *Query:* *"Show sales breakdown by sales channel"*
-  - *SQL Generated:* `SELECT Sales_channel, SUM(Quantity) AS total_qty, SUM(net_revenue) AS total_rev FROM v_valid_sales GROUP BY Sales_channel ORDER BY total_rev DESC;`
-  - *Result:* Online ($746,750 / 353 units) vs Retail ($692,450 / 280 units).
-- **Category-Level Analysis:**
-  - *Query:* *"Which product category had the highest discount amount?"*
-  - *SQL Generated:* Groups by `Category` and sums `Discount_amount`.
-- **Top Individual Orders:**
-  - *Query:* *"List the top 3 transactions by units sold"*
-  - *SQL Generated:* `SELECT Transaction_Id, Product, Quantity, net_revenue FROM v_valid_sales ORDER BY Quantity DESC LIMIT 3;`
-- **Data Quality Audits:**
-  - *Query:* *"Show all flagged anomaly transactions"*
-  - *SQL Generated:* Queries `v_sales_anomalies` to inspect the 3 quarantined records.
+- *"Show sales breakdown by sales channel"*  
+  $\rightarrow$ Groups by `Sales_channel`. Shows Online generated $746,750 (353 units) and Retail generated $692,450 (280 units).
+- *"Which product category had the highest discount?"*  
+  $\rightarrow$ Groups by `Category` and sums `Discount_amount`.
+- *"List the top 3 biggest orders by quantity"*  
+  $\rightarrow$ Returns the top 3 rows ordered by `Quantity DESC`.
+- *"Show all bad or returned transactions"*  
+  $\rightarrow$ Queries `v_sales_anomalies` to show the 3 flagged records (1 returned, 1 zero quantity, 1 missing price).
 
 ---
 
-## 4. Automated Tests
+## 5. Automated Tests (19 Tests Passing)
 
-Run all tests with:
+Run tests anytime with:
 ```bash
 pytest -v test_core.py
 ```
 
-The test suite contains **19 unit and integration tests** in `test_core.py`:
-- **Core Analytics (Q1–Q5):** Verifies total revenue ($1,439,200.00 across 48 orders), top product (Monitor with $473,000.00), 6-month trends with MoM percentages, top region (South with $411,200.00), and Jan vs Feb change (+$24,350.00 / +11.58%).
-- **Input Edge Cases:** Verifies that empty strings (`""`), whitespace (`"   "`), and `None` return structured error objects instead of crashing.
-- **SQL Security & Whitelisting:** Verifies that `DROP TABLE`, `DELETE FROM`, multi-statement attacks (`SELECT 1; DROP TABLE...`), and unauthorized tables (`sqlite_master`, `users`) are rejected.
-- **Engine-Level Protection:** Verifies that attempting write operations on the read-only connection raises an `OperationalError`.
-- **API Contracts:** Verifies `GET /health`, `GET /schema`, `POST /query` success (200), and bad input rejection (400).
+What the 19 tests check:
+- **Core Numbers (Q1 to Q5):** Checks that all calculations match the expected database numbers.
+- **Bad Inputs:** Checks that empty strings `""`, whitespace `"   "`, and `None` don't crash the server.
+- **SQL Security:** Checks that `DROP TABLE`, `DELETE`, and multi-statement queries are blocked.
+- **Engine Security:** Directly tests that `get_readonly_connection()` throws an error if someone tries to delete data.
+- **Table Whitelist:** Checks that queries to `sqlite_master` or `users` get blocked.
+- **Data Cleanup:** Checks that returned/broken orders are kept separate from valid sales.
+- **FastAPI Endpoints:** Checks `/health`, `/schema`, and `/query` (success 200 and error 400).
 
 ---
 
-## 5. AI Development Reflection
+## 6. How I Built This & AI Reflections
 
-### Which AI tools I used
-- **GitHub Copilot**: Used for inline code completion, writing repetitive TypedDict schemas for LangGraph state, and drafting test assertion blocks.
-- **Groq API (`qwen/qwen3.8-27b`)**: Used at runtime for natural language text-to-SQL translation and answer synthesis.
+### AI Tools I Used
+- **GitHub Copilot:** Used in VS Code for code patching, auto-completing function types, and writing repetitive pytest test cases.
+- **Groq API (`qwen/qwen3.8-27b`):** The LLM that translates user questions into SQL. Selected because it responds in ~300ms.
 
-### How I used AI during development
-- I used GitHub Copilot to quickly generate boilerplate code (like Pydantic models and repetitive SQLite row conversions).
-- I used LLM prompts to inspect the CSV column distributions and verify table edge cases.
-- In the agent pipeline, I used the LLM strictly where language understanding is needed (interpreting custom questions). For the 5 core business metrics, I routed them to deterministic SQL functions so that arithmetic is 100% reproducible and never hallucinated.
+### How I Used AI
+- I used GitHub Copilot to speed up boilerplate code (like Pydantic models, SQL row dictionaries, and test structures).
+- I used LLM prompts to inspect the CSV columns and understand the data.
+- In the actual app, I only let the LLM handle understanding English questions. I did NOT let the LLM do math. All math is done by SQL in the database so answers are always 100% accurate.
 
-### Problems I encountered
-1. **Model deprecation on Groq:** My first attempt used `llama-3.3-70b-versatile`, but Groq returned a `model_not_found` error because the model was unavailable in the current endpoint.
-2. **Blank responses from reasoning models:** Testing with `openai/gpt-oss-20b` resulted in empty response strings because the model used up its token limit writing internal reasoning chains rather than outputting the SQL.
-3. **Dirty data skewing calculations:** The raw CSV contained 3 bad rows: a returned monitor (`TXN0033`), an order with 0 quantity (`TXN0034`), and an order with a missing price (`TXN0051`). Directly summing raw columns inflated revenue and produced incorrect averages.
-4. **Streamlit reload overhead:** Calling `init_db()` unconditionally at the top of `app.py` caused Streamlit to reload the CSV and rewrite the database on every chat click.
-5. **False positive status on database errors:** If SQLite threw an execution error on a deterministic query, the router caught it but still marked the graph state as successful with an empty answer.
+### Problems I Faced & How I Fixed Them
+1. **Old model didn't exist:** I initially tried `llama-3.3-70b-versatile` on Groq, but got a `model_not_found` error. I ran a script to list available models on my key and switched to `qwen/qwen3.8-27b`, which worked right away.
+2. **Blank answers with reasoning models:** I tested with `openai/gpt-oss-20b`, but it used up all its tokens on internal thinking steps and returned empty SQL. Switching to Qwen solved this.
+3. **Bad data in the CSV:** The raw CSV had 3 problematic rows (TXN0033 was returned, TXN0034 had 0 quantity, and TXN0051 had no price). If you just ran `SUM(price * quantity)`, the totals were wrong. I fixed this by creating `clean.py` and an SQLite view `v_valid_sales` that only includes valid, completed sales.
+4. **Streamlit reloading database repeatedly:** At first, `database.init_db()` ran on every click in Streamlit, re-reading the CSV and writing to disk every time. I fixed it by caching the setup with `@st.cache_resource` and adding a check so it skips re-creating the database if it already exists.
+5. **Database errors showing as success:** Early on, if the database threw an error on a question, the router returned an empty string but marked the status as success. I wrote a `_format_db_response()` helper that checks `db_res.get("success")` and forwards the real error to the user.
 
-### How I debugged them
-- I ran a script checking `client.models.list()` on Groq, found `qwen/qwen3.8-27b`, and switched to it. It responds in ~300ms and outputs clean SQL without reasoning token bloat.
-- I wrote `clean.py` and created an SQLite view `v_valid_sales` that filters `is_valid_sale = 1 AND Status = 'Completed'`. All business queries target this view so anomalies are segregated.
-- I added a fast-path check in `init_db()` to skip re-reading the CSV if `sales.db` already exists with records, and cached the initialization in `app.py` using `@st.cache_resource`.
-- I added a `_format_db_response()` helper in `agent.py` that verifies `db_res.get("success")` before setting status, properly propagating errors into the graph state.
-- I added defense-in-depth security: keyword validation, table whitelisting, SQLite `mode=ro` URI, and `PRAGMA query_only = ON`.
-
-### What I would improve with another day of work
-1. **Chart Generation:** Auto-generate interactive Plotly or Altair charts in Streamlit whenever a query returns time-series trends or category breakdowns.
-2. **Conversational Memory:** Add multi-turn message history into LangGraph state so users can ask follow-ups (e.g., *"What about in the East region?"*) without repeating the whole context.
-3. **Query Caching:** Add an in-memory cache for common questions so recurring user queries return in 0ms without hitting the LLM API.
+### What I Would Add With One More Day
+1. **Interactive Charts:** Show bar charts and trend lines automatically in Streamlit using Altair or Plotly.
+2. **Chat Memory:** Allow follow-up questions like *"What about for last month?"* without having to re-type the full question.
+3. **Query Caching:** Save answers to common questions in memory so repeated questions answer in 0ms without calling the LLM.
