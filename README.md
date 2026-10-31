@@ -34,10 +34,7 @@ Skip the local setup — the entire assistant is live and interactive in browser
 > [!IMPORTANT]
 > **Click the link above to test immediately!**  
 > You do **not** need to clone the repository, install Python packages, or enter a Groq API key. The deployed web interface includes:
-> - One-click selection for all **5 Challenge Benchmark Questions**.
-> - Live chat input for **custom dynamic sales queries** (e.g. sales channels, anomalies, order quantities).
-> - Complete inspectability: verified SQL queries, execution method citations, and supporting data tables.
-> - Automatic backend wake-up connected to the live cloud API.
+> - Add question bank dropdown for simply selecting and testing.
 
 ---
 
