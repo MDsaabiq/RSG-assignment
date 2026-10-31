@@ -1,21 +1,24 @@
-
+# agent.py
 """
-AI Business Intelligence Agent & Backend Query Processor.
+LangGraph-Powered AI Business Intelligence Agent.
 
-Responsibilities:
-1. Validates and sanitizes incoming natural language questions.
-2. Manages LLM integration (Groq API key loaded from .env).
-3. Routes core benchmark questions to deterministic database tools (zero hallucination).
-4. Generates, validates, and safely executes dynamic SQL for exploratory business queries.
-5. Provides self-correction loop for SQL errors (capped at 2 iterations).
-6. Returns consistent structured answers with supporting numerical data.
-7. Exposes an optional FastAPI endpoint for API evaluation.
+Architecture:
+- StateGraph workflow orchestrating:
+  1. Input Validation Node (backend security, null/empty checks, injection prevention)
+  2. Intent Routing Node (routes 5 benchmark questions to deterministic tools)
+  3. Dynamic SQL Generation Node (LLM Text-to-SQL with Groq + schema injection)
+  4. SQL Safety & Execution Node (read-only verification + self-healing retry loop)
+  5. Answer Synthesis Node (summarizes database figures into business answers)
+
+FastAPI endpoints are decoupled and located separately in api.py.
 """
 
 import os
 import re
-from typing import Dict, Any, List, Optional
+from typing import TypedDict, Optional, List, Dict, Any
 from dotenv import load_dotenv
+
+from langgraph.graph import StateGraph, START, END
 
 import database
 
@@ -25,44 +28,25 @@ load_dotenv()
 # Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("GROQ_API_KEY2")
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
-MAX_SQL_RETRIES = 2
+MAX_SQL_RETRIES = 4
 
 
 # ==============================================================================
-# 1. Backend Input Validation
+# 1. State Definition
 # ==============================================================================
 
-def validate_user_input(query: Optional[str]) -> Dict[str, Any]:
-    """
-    Validates user query string to guard against empty, whitespace, null,
-    excessively long inputs, or prompt injection traps.
-    """
-    if query is None:
-        return {"is_valid": False, "error": "Query cannot be null."}
-
-    trimmed = str(query).strip()
-
-    if len(trimmed) == 0:
-        return {"is_valid": False, "error": "Query cannot be empty or pure whitespace."}
-
-    if len(trimmed) > 1000:
-        return {"is_valid": False, "error": "Query exceeds maximum allowed length of 1000 characters."}
-
-    # Guard against destructive prompt injections aiming to alter database
-    suspicious_patterns = [
-        r"\bdrop\s+table\b",
-        r"\bdelete\s+from\b",
-        r"\btruncate\s+table\b",
-        r"\bupdate\s+\w+\s+set\b"
-    ]
-    for pattern in suspicious_patterns:
-        if re.search(pattern, trimmed, re.IGNORECASE):
-            return {
-                "is_valid": False,
-                "error": "Destructive SQL operations are not permitted in queries."
-            }
-
-    return {"is_valid": True, "cleaned_query": trimmed, "error": None}
+class AgentState(TypedDict):
+    question: Optional[str]
+    cleaned_query: str
+    is_valid: bool
+    route: str  # "deterministic", "dynamic_sql", "error"
+    sql: Optional[str]
+    answer: str
+    supporting_data: List[Dict[str, Any]]
+    columns: List[str]
+    execution_source: str
+    error: Optional[str]
+    retry_count: int
 
 
 # ==============================================================================
@@ -82,37 +66,99 @@ def get_groq_client():
 
 
 # ==============================================================================
-# 3. Intent Matching for Core Challenge Questions (Deterministic Path)
+# 3. LangGraph Nodes
 # ==============================================================================
 
-def match_deterministic_benchmark(query: str) -> Optional[Dict[str, Any]]:
+def input_validation_node(state: AgentState) -> Dict[str, Any]:
     """
-    Matches the 5 explicit challenge benchmark questions to deterministic database tools.
-    Provides 100% mathematical accuracy without relying on LLM arithmetic.
+    Node 1: Backend Query Input Validation
+    Protects against null, empty strings, whitespace, length overflow,
+    and destructive prompt injection attempts.
     """
-    q = query.lower().strip()
+    raw_query = state.get("question")
+
+    if raw_query is None:
+        return {
+            "is_valid": False,
+            "error": "Query cannot be null.",
+            "answer": "Invalid query: Query cannot be null.",
+            "execution_source": "input_validation",
+            "route": "error"
+        }
+
+    trimmed = str(raw_query).strip()
+
+    if len(trimmed) == 0:
+        return {
+            "is_valid": False,
+            "error": "Query cannot be empty or pure whitespace.",
+            "answer": "Invalid query: Query cannot be empty or pure whitespace.",
+            "execution_source": "input_validation",
+            "route": "error"
+        }
+
+    if len(trimmed) > 1000:
+        return {
+            "is_valid": False,
+            "error": "Query exceeds maximum allowed length of 1000 characters.",
+            "answer": "Invalid query: Query exceeds maximum allowed length of 1000 characters.",
+            "execution_source": "input_validation",
+            "route": "error"
+        }
+
+    # Guard against destructive SQL injection / malicious prompts
+    suspicious_patterns = [
+        r"\bdrop\s+table\b",
+        r"\bdelete\s+from\b",
+        r"\btruncate\s+table\b",
+        r"\bupdate\s+\w+\s+set\b",
+        r"\balter\s+table\b"
+    ]
+    for pattern in suspicious_patterns:
+        if re.search(pattern, trimmed, re.IGNORECASE):
+            return {
+                "is_valid": False,
+                "error": "Destructive SQL operations are not permitted in queries.",
+                "answer": "Invalid query: Destructive SQL operations are not permitted in queries.",
+                "execution_source": "input_validation",
+                "route": "error"
+            }
+
+    return {
+        "is_valid": True,
+        "cleaned_query": trimmed,
+        "error": None
+    }
+
+
+def intent_router_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Node 2: Intent Router
+    Evaluates if query matches one of the 5 explicit challenge questions.
+    If matched, calls deterministic database tools (zero hallucination).
+    Otherwise, routes to dynamic SQL generation.
+    """
+    q = state.get("cleaned_query", "").lower().strip()
 
     # Challenge Q1: Total revenue
     if (
         ("total" in q and "revenue" in q)
         or ("overall" in q and "revenue" in q)
         or ("how much revenue" in q and "total" in q)
-        or q == "what is the total revenue?"
-        or q == "what is the total revenue"
+        or q in ["what is the total revenue?", "what is the total revenue"]
     ):
         db_res = database.get_total_revenue()
         return {
-            "status": "success",
-            "question": query,
-            "answer": db_res.get("summary_text", "Total revenue calculated successfully."),
+            "route": "deterministic",
+            "answer": db_res.get("summary_text", "Total revenue calculated."),
             "supporting_data": db_res.get("rows", []),
             "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.get_total_revenue"),
+            "sql": db_res.get("query"),
             "execution_source": "deterministic_tool",
             "error": None
         }
 
-    # Challenge Q2: Highest revenue product
+    # Challenge Q2: Top product by revenue
     if (
         ("product" in q and ("highest" in q or "top" in q or "best" in q) and "revenue" in q)
         or ("which product generated the highest revenue" in q)
@@ -120,12 +166,11 @@ def match_deterministic_benchmark(query: str) -> Optional[Dict[str, Any]]:
     ):
         db_res = database.get_top_product(limit=3)
         return {
-            "status": "success",
-            "question": query,
+            "route": "deterministic",
             "answer": db_res.get("summary_text", "Top product identified."),
             "supporting_data": db_res.get("rows", []),
             "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.get_top_product"),
+            "sql": db_res.get("query"),
             "execution_source": "deterministic_tool",
             "error": None
         }
@@ -138,12 +183,11 @@ def match_deterministic_benchmark(query: str) -> Optional[Dict[str, Any]]:
     ):
         db_res = database.get_monthly_revenue_trend()
         return {
-            "status": "success",
-            "question": query,
+            "route": "deterministic",
             "answer": db_res.get("summary_text", "Monthly revenue trend calculated."),
             "supporting_data": db_res.get("rows", []),
             "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.get_monthly_revenue_trend"),
+            "sql": db_res.get("query"),
             "execution_source": "deterministic_tool",
             "error": None
         }
@@ -156,24 +200,19 @@ def match_deterministic_benchmark(query: str) -> Optional[Dict[str, Any]]:
     ):
         db_res = database.get_top_region(limit=4)
         return {
-            "status": "success",
-            "question": query,
+            "route": "deterministic",
             "answer": db_res.get("summary_text", "Top sales region identified."),
             "supporting_data": db_res.get("rows", []),
             "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.get_top_region"),
+            "sql": db_res.get("query"),
             "execution_source": "deterministic_tool",
             "error": None
         }
 
     # Challenge Q5: Revenue change between two months
-    # Checks for month mentions like "Jan" and "Feb" or "2026-01" and "2026-02"
     if ("between" in q and ("month" in q or "revenue" in q)) or ("change between" in q):
-        # Default to Jan (2026-01) and Feb (2026-02) if not specifically specified
         m1 = "2026-01"
         m2 = "2026-02"
-
-        # Check for month names
         month_map = {
             "jan": "2026-01", "january": "2026-01",
             "feb": "2026-02", "february": "2026-02",
@@ -192,50 +231,40 @@ def match_deterministic_benchmark(query: str) -> Optional[Dict[str, Any]]:
 
         db_res = database.compare_monthly_revenue(m1, m2)
         return {
-            "status": "success",
-            "question": query,
+            "route": "deterministic",
             "answer": db_res.get("summary_text", f"Revenue comparison between {m1} and {m2} completed."),
             "supporting_data": db_res.get("rows", []),
             "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.compare_monthly_revenue"),
+            "sql": db_res.get("query"),
             "execution_source": "deterministic_tool",
             "error": None
         }
 
-    # Data Quality / Anomaly audit question
-    if "anomaly" in q or "data quality" in q or "flagged" in q or "returned" in q:
-        db_res = database.get_data_quality_audit()
-        return {
-            "status": "success",
-            "question": query,
-            "answer": "Data quality audit retrieved across all raw transactions.",
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql_executed": db_res.get("query", "Pre-calculated via database.get_data_quality_audit"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
-
-    return None
+    # Route to dynamic SQL generation
+    return {
+        "route": "dynamic_sql",
+        "error": None
+    }
 
 
-# ==============================================================================
-# 4. Dynamic Text-to-SQL Generation (AI Reasoning Layer)
-# ==============================================================================
-
-def generate_sql_from_question(
-    question: str,
-    error_feedback: Optional[str] = None
-) -> Optional[str]:
+def generate_sql_node(state: AgentState) -> Dict[str, Any]:
     """
-    Prompts the LLM (Groq) with database schema to generate a clean, read-only SQL query.
-    If error_feedback is provided, guides the model to fix its prior mistake.
+    Node 3: Dynamic SQL Generation
+    Prompts Groq LLM with database schema and user question.
+    Incorporates prior error feedback if this is a self-correction retry.
     """
     client = get_groq_client()
     if not client:
-        return None
+        return {
+            "sql": None,
+            "error": "Groq API key not configured or client initialization failed.",
+            "answer": "Unable to generate query: LLM service is unavailable.",
+            "execution_source": "dynamic_sql"
+        }
 
     schema_info = database.get_schema_info()
+    question = state.get("cleaned_query", "")
+    last_error = state.get("error")
 
     system_prompt = f"""
 You are an expert SQLite business intelligence SQL developer.
@@ -245,15 +274,14 @@ Generate a single valid read-only SQLite query to answer the user's question.
 
 STRICT INSTRUCTIONS:
 1. Output ONLY the raw SQL query. No explanations, no markdown blocks, no commentary.
-2. Query strictly from 'v_valid_sales' unless the user asks for anomalies or returned orders.
+2. Query strictly from 'v_valid_sales' unless user asks for anomalies or returned orders.
 3. Use 'net_revenue' for revenue calculations.
 4. Do not use destructive operations (NO DROP, DELETE, UPDATE, INSERT, ALTER).
-5. You can use other then harmful queries if question is different
 """
 
     user_content = f"User question: {question}"
-    if error_feedback:
-        user_content += f"\n\nYour previous SQL produced this SQLite error: {error_feedback}. Please correct the SQL."
+    if last_error:
+        user_content += f"\n\nYour previous SQL produced this error: {last_error}. Please correct the SQL."
 
     try:
         response = client.chat.completions.create(
@@ -267,165 +295,222 @@ STRICT INSTRUCTIONS:
         )
         raw_text = response.choices[0].message.content.strip()
 
-        # Clean any accidental markdown code fences
+        # Clean markdown wrappers
         cleaned_sql = re.sub(r"^```(sql)?", "", raw_text, flags=re.IGNORECASE).strip()
         cleaned_sql = re.sub(r"```$", "", cleaned_sql).strip()
-        return cleaned_sql
+
+        return {
+            "sql": cleaned_sql,
+            "error": None
+        }
     except Exception as e:
-        print(f"[Error in generate_sql_from_question]: {e}")
-        return None
+        return {
+            "sql": None,
+            "error": f"LLM Text-to-SQL generation failed: {str(e)}",
+            "answer": f"LLM service error: {str(e)}"
+        }
 
 
-def synthesize_answer(
-    question: str,
-    sql: str,
-    rows: List[Dict[str, Any]]
-) -> str:
+def execute_and_synthesize_node(state: AgentState) -> Dict[str, Any]:
     """
-    Prompts the LLM to write a concise, professional business summary
-    using ONLY the numbers present in the retrieved database rows.
+    Node 4: SQL Safety Validation, Execution, & Response Synthesis
+    Validates read-only safety, executes query against SQLite,
+    and synthesizes a natural language business summary.
+    If execution fails, increments retry_count for reflection loop.
     """
+    sql = state.get("sql")
+    retries = state.get("retry_count", 0)
+
+    if not sql:
+        return {
+            "error": state.get("error", "No SQL generated to execute."),
+            "answer": state.get("answer", "No query could be formulated."),
+            "retry_count": retries + 1
+        }
+
+    # 1. SQL Safety Validation
+    is_safe, safety_err = database.validate_sql(sql)
+    if not is_safe:
+        return {
+            "error": f"Security violation: {safety_err}",
+            "answer": f"Query blocked: {safety_err}",
+            "retry_count": retries + 1
+        }
+
+    # 2. Database Execution
+    db_res = database.execute_safe_query(sql)
+    if not db_res.get("success", False):
+        return {
+            "error": db_res.get("error", "Database execution error"),
+            "answer": f"Database query failed: {db_res.get('error')}",
+            "retry_count": retries + 1
+        }
+
+    rows = db_res.get("rows", [])
+    columns = db_res.get("columns", [])
+
+    # 3. Answer Synthesis
     client = get_groq_client()
-    if not client or not rows:
-        # Fallback summary without LLM
-        return f"Query returned {len(rows)} record(s). Refer to the supporting data table for details."
+    summary_answer = f"Query executed successfully with {len(rows)} result(s)."
 
-    prompt = f"""
+    if client and rows:
+        synth_prompt = f"""
 You are a business intelligence assistant. Summarize the answer to the user's question
 based strictly on the database query result below.
 
-Question: {question}
-SQL Query Used: {sql}
-Database Result Rows: {rows}
+Question: {state.get('cleaned_query')}
+SQL Query: {sql}
+Data: {rows[:10]}
 
 Rules:
 - State the key finding clearly and directly.
 - Use only the numbers present in the data rows.
 - Keep the response within 2-3 sentences.
 """
-    try:
-        response = client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=150
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return f"Analysis complete based on {len(rows)} record(s). See supporting figures below."
+        try:
+            resp = client.chat.completions.create(
+                model=DEFAULT_MODEL,
+                messages=[{"role": "user", "content": synth_prompt}],
+                temperature=0.2,
+                max_tokens=150
+            )
+            summary_answer = resp.choices[0].message.content.strip()
+        except Exception:
+            pass
 
-
-# ==============================================================================
-# 5. Core Pipeline: Process User Query
-# ==============================================================================
-
-def process_user_query(query: str) -> Dict[str, Any]:
-    """
-    Main entry point for processing a natural language business question.
-    Executes input validation, deterministic routing, safe Text-to-SQL,
-    and structured response formatting.
-    """
-    # 1. Backend Input Validation
-    val_res = validate_user_input(query)
-    if not val_res["is_valid"]:
-        return {
-            "status": "error",
-            "question": query if query is not None else "",
-            "answer": f"Invalid query: {val_res.get('error')}",
-            "supporting_data": [],
-            "columns": [],
-            "sql_executed": None,
-            "execution_source": "input_validation",
-            "error": val_res.get("error")
-        }
-
-    cleaned_query = val_res["cleaned_query"]
-
-    # 2. Check Deterministic Route (Guarantees 100% precision on benchmark questions)
-    matched_benchmark = match_deterministic_benchmark(cleaned_query)
-    if matched_benchmark:
-        return matched_benchmark
-
-    # 3. Dynamic Text-to-SQL Path
-    sql_query = None
-    last_error = None
-
-    for attempt in range(MAX_SQL_RETRIES):
-        sql_query = generate_sql_from_question(cleaned_query, error_feedback=last_error)
-        if not sql_query:
-            break
-
-        # Validate SQL safety before execution
-        is_safe, safety_err = database.validate_sql(sql_query)
-        if not is_safe:
-            last_error = f"Security rule violation: {safety_err}"
-            continue
-
-        # Execute safe query
-        db_res = database.execute_safe_query(sql_query)
-        if db_res.get("success", False):
-            rows = db_res.get("rows", [])
-            answer_text = synthesize_answer(cleaned_query, sql_query, rows)
-            return {
-                "status": "success",
-                "question": cleaned_query,
-                "answer": answer_text,
-                "supporting_data": rows,
-                "columns": db_res.get("columns", []),
-                "sql_executed": sql_query,
-                "execution_source": "dynamic_sql",
-                "error": None
-            }
-        else:
-            last_error = db_res.get("error", "Unknown database error")
-
-    # 4. Fallback if Dynamic SQL could not produce a valid result
     return {
-        "status": "error",
-        "question": cleaned_query,
-        "answer": "Unable to safely process this inquiry with the sales database.",
-        "supporting_data": [],
-        "columns": [],
-        "sql_executed": sql_query,
-        "execution_source": "dynamic_sql_failure",
-        "error": last_error or "LLM generation or database execution failed."
+        "answer": summary_answer,
+        "supporting_data": rows,
+        "columns": columns,
+        "execution_source": "dynamic_sql",
+        "error": None
     }
 
 
 # ==============================================================================
-# 6. Optional FastAPI Backend Endpoint
+# 4. LangGraph Routing Functions
 # ==============================================================================
 
-try:
-    from fastapi import FastAPI
-    from pydantic import BaseModel
+def route_after_validation(state: AgentState) -> str:
+    """Routes to intent router if valid, or terminates if input is invalid."""
+    return "intent_router" if state.get("is_valid", False) else END
 
-    class QuestionRequest(BaseModel):
-        question: Optional[str] = None
 
-    api_app = FastAPI(
-        title="Sales BI Assistant Backend API",
-        description="REST API accepting natural language questions and returning structured database-backed analytics."
-    )
+def route_after_intent(state: AgentState) -> str:
+    """Routes to generate_sql if dynamic analysis is needed, else terminates with deterministic tool."""
+    return "generate_sql" if state.get("route") == "dynamic_sql" else END
 
-    @api_app.post("/query")
-    def api_query_endpoint(req: QuestionRequest):
-        return process_user_query(req.question)
 
-    @api_app.get("/health")
-    def health_check():
-        return {"status": "healthy", "service": "Sales BI Assistant API"}
+def route_after_execution(state: AgentState) -> str:
+    """
+    Self-correction conditional edge:
+    If execution succeeded (error is None), ends.
+    If execution failed and retries < MAX_SQL_RETRIES, loops back to generate_sql.
+    Otherwise, terminates with error.
+    """
+    if state.get("error") is None:
+        return END
 
-except ImportError:
-    api_app = None
+    if state.get("retry_count", 0) < MAX_SQL_RETRIES:
+        return "generate_sql"
+
+    return END
 
 
 # ==============================================================================
-# CLI Test Runner
+# 5. Build & Compile LangGraph
+# ==============================================================================
+
+def build_agent_graph():
+    """Constructs and compiles the LangGraph StateGraph workflow."""
+    workflow = StateGraph(AgentState)
+
+    # Add Nodes
+    workflow.add_node("input_validation", input_validation_node)
+    workflow.add_node("intent_router", intent_router_node)
+    workflow.add_node("generate_sql", generate_sql_node)
+    workflow.add_node("execute_and_synthesize", execute_and_synthesize_node)
+
+    # Add Edges & Conditional Routing
+    workflow.add_edge(START, "input_validation")
+    workflow.add_conditional_edges("input_validation", route_after_validation)
+    workflow.add_conditional_edges("intent_router", route_after_intent)
+    workflow.add_edge("generate_sql", "execute_and_synthesize")
+    workflow.add_conditional_edges("execute_and_synthesize", route_after_execution)
+
+    return workflow.compile()
+
+
+# Global compiled graph instance
+agent_graph = build_agent_graph()
+
+
+# ==============================================================================
+# 6. Public API: Process User Query
+# ==============================================================================
+
+def process_user_query(query: Optional[str]) -> Dict[str, Any]:
+    """
+    Main interface to process natural language questions through the LangGraph agent.
+    Returns uniform structured dictionary:
+    {
+        "status": "success" | "error",
+        "question": str,
+        "answer": str,
+        "supporting_data": list of dicts,
+        "columns": list of str,
+        "sql_executed": str or None,
+        "execution_source": "deterministic_tool" | "dynamic_sql" | "input_validation",
+        "error": str or None
+    }
+    """
+    initial_state: AgentState = {
+        "question": query,
+        "cleaned_query": "",
+        "is_valid": False,
+        "route": "",
+        "sql": None,
+        "answer": "",
+        "supporting_data": [],
+        "columns": [],
+        "execution_source": "",
+        "error": None,
+        "retry_count": 0
+    }
+
+    try:
+        final_state = agent_graph.invoke(initial_state)
+
+        has_error = final_state.get("error") is not None
+        return {
+            "status": "error" if has_error else "success",
+            "question": str(query) if query is not None else "",
+            "answer": final_state.get("answer", ""),
+            "supporting_data": final_state.get("supporting_data", []),
+            "columns": final_state.get("columns", []),
+            "sql_executed": final_state.get("sql"),
+            "execution_source": final_state.get("execution_source", "langgraph"),
+            "error": final_state.get("error")
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "question": str(query) if query is not None else "",
+            "answer": f"Unexpected execution error: {str(e)}",
+            "supporting_data": [],
+            "columns": [],
+            "sql_executed": None,
+            "execution_source": "pipeline_exception",
+            "error": str(e)
+        }
+
+
+# ==============================================================================
+# CLI Verification
 # ==============================================================================
 
 if __name__ == "__main__":
-    print("=== Testing Agent with Challenge Questions ===\n")
+    print("=== Testing LangGraph Agent Workflow ===\n")
 
     test_queries = [
         "What is the total revenue?",
@@ -448,4 +533,3 @@ if __name__ == "__main__":
         if res.get("error"):
             print(f"  Error: {res['error']}")
         print("-" * 60)
-
