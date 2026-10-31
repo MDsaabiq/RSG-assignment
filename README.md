@@ -95,17 +95,30 @@ Once the server or app is running, you can test open-ended questions to evaluate
 
 ```mermaid
 flowchart TD
-    User["User Question\n(Chat or API)"] --> InputCheck["1. Check Input\n(Empty, Null, Injection guards)"]
-    InputCheck --> Router{"2. Is it one of the 5 benchmark questions?"}
+    User["👤 User Question<br/><i>(Web Chat or REST API)</i>"]
+    InputCheck["🛡️ 1. Input Validation<br/><i>(Null, empty, injection check)</i>"]
+    Router{"🎯 Matches Benchmark<br/>Q1 - Q5?"}
+    FastTrack["⚡ 2A. Deterministic SQL<br/><i>(100% exact math, zero hallucination)</i>"]
+    AIQuery["🤖 2B. Text-to-SQL (Groq)<br/><i>(Dynamic schema-grounded query)</i>"]
+    SafetyCheck["🔒 3. Read-Only Guard<br/><i>(mode=ro & PRAGMA query_only)</i>"]
+    Answer["📊 4. Response Synthesis<br/><i>(Natural answer + data table)</i>"]
 
-    Router -->|Yes| FastTrack["3A. Deterministic Tool\n(Pre-written SQL, 100% accurate)"]
-    Router -->|No, custom question| AIQuery["3B. Text-to-SQL with Groq\n(Writes read-only SQL from schema)"]
-
-    AIQuery --> SafetyCheck["4. SQL Safety Check\n(Read-only mode, table whitelist)"]
-    SafetyCheck -->|"Syntax Error (retries under 2)"| AIQuery
-
-    FastTrack --> Answer["5. Format Final Answer\n(Summary text + data table + SQL used)"]
+    User --> InputCheck
+    InputCheck --> Router
+    Router -->|Yes: Q1-Q5| FastTrack
+    Router -->|No: Custom| AIQuery
+    AIQuery --> SafetyCheck
+    SafetyCheck -.->|Syntax retry| AIQuery
+    FastTrack --> Answer
     SafetyCheck --> Answer
+
+    style User fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style InputCheck fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+    style Router fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    style FastTrack fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ffffff
+    style AIQuery fill:#2e1065,stroke:#a78bfa,stroke-width:2px,color:#ffffff
+    style SafetyCheck fill:#4a044e,stroke:#f472b6,stroke-width:2px,color:#ffffff
+    style Answer fill:#0f172a,stroke:#22c55e,stroke-width:2px,color:#f8fafc
 ```
 
 ### In Plain English:
@@ -186,21 +199,30 @@ When a user asks about a specific anomalous transaction (like `TXN0034` with 0 q
 
 ---
 
-## 5. Automated Tests (19 Tests Passing)
+## 5. Automated Tests (10 Tests Passing)
 
-Run tests anytime with:
+Run the complete test suite from the repository root:
+
 ```bash
 pytest -v test_core.py
 ```
 
-What the 19 tests check:
-- **Core Numbers (Q1 to Q5):** Checks that all calculations match the expected database numbers.
-- **Bad Inputs:** Checks that empty strings `""`, whitespace `"   "`, and `None` don't crash the server.
-- **SQL Security:** Checks that `DROP TABLE`, `DELETE`, and multi-statement queries are blocked.
-- **Engine Security:** Directly tests that `get_readonly_connection()` throws an error if someone tries to delete data.
-- **Table Whitelist:** Checks that queries to `sqlite_master` or `users` get blocked.
-- **Data Cleanup:** Checks that returned/broken orders are kept separate from valid sales.
-- **FastAPI Endpoints:** Checks `/health`, `/schema`, and `/query` (success 200 and error 400).
+The tests are API-first: the main user-facing behavior is tested through the
+same `POST /query` endpoint exposed by FastAPI and Swagger UI.
+
+The 10 focused tests cover:
+
+- All five benchmark questions through `/query`.
+- Verified total-revenue figures and the response contract.
+- A custom `/query` question using mocked Groq SQL and real SQLite execution.
+- Empty, whitespace-only, null, and missing-question requests.
+- Destructive prompts, multi-statement SQL, and read-only connection protection.
+- `/health`, `/schema`, and data-quality segregation.
+
+The custom-question test mocks only the external Groq call. This keeps the
+automated suite deterministic and key-free while still testing the complete
+API-to-agent-to-database execution path. The live deployed endpoint can be
+tested separately through the [Render Swagger UI](https://rsg-assignment.onrender.com/docs).
 
 ---
 
