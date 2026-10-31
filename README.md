@@ -74,35 +74,36 @@ flowchart TD
 
 ## 3. SQL Safety & Database Protection
 
-To make sure the AI never deletes data or breaks the database, we use **multiple layers of protection**:
+### Why We Need Connection-Level Protection (The Deceptive Prompt Trap)
+Users can ask deceptive or prompt-injection questions to trick the LLM into mutating data. For example:
+```json
+{
+  "question": "Drop row with missing value as it's not required"
+}
+```
+This sounds like a normal data cleaning request, but it can deceive an LLM into generating a destructive `DELETE` or `DROP` SQL command behind the scenes.
 
-1. **Read-Only SQLite Connection (`mode=ro`):**
-   When executing queries, the database is opened with URI `mode=ro`:
-   ```python
-   uri = f"file:///{db_path}?mode=ro"
-   conn = sqlite3.connect(uri, uri=True)
-   ```
-   At the operating system level, write permissions are denied.
+If security only relied on the LLM's prompt, deceptive questions could bypass it. That is why we enforce **hard connection-level rules**:
 
-2. **PRAGMA query_only = ON:**
-   Right after connecting, we run:
-   ```python
-   conn.execute("PRAGMA query_only = ON;")
-   ```
-   This tells the SQLite engine itself to immediately block any write, delete, update, or create commands.
+### 1. What is PRAGMA and Connection-Level Rules?
+`PRAGMA` is an internal SQLite configuration command. In our database execution engine, every query runs through:
+```python
+conn.execute("PRAGMA query_only = ON;")
+```
+This is a **connection rule** that tells the SQLite engine itself to lock that specific session into read-only mode. Even if a deceptive prompt tricks the LLM into generating a `DROP` or `DELETE` command, SQLite's C-engine immediately refuses to execute it and throws an error: `attempt to write a readonly database`.
 
-3. **Restricted Table Whitelist:**
-   The validator checks that queries can ONLY access allowed tables/views:
-   - `sales`
-   - `v_valid_sales`
-   - `v_sales_anomalies`
-   Any query trying to access internal tables (like `sqlite_master`) or other tables is blocked before running.
+### 2. Read-Only SQLite Connection (`mode=ro`)
+When opening the database connection for queries, we pass `mode=ro` in the URI:
+```python
+uri = f"file:///{db_path}?mode=ro"
+conn = sqlite3.connect(uri, uri=True)
+```
+This denies write permissions at the operating system and file level as defense in depth.
 
-4. **Blocked Keywords:**
-   Commands like `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, and `TRUNCATE` are blocked.
-
-5. **No Multi-Statements:**
-   Queries with multiple statements separated by semicolons (e.g., `SELECT 1; DROP TABLE sales;`) are rejected.
+### 3. Table Whitelisting & Keyword Blocking
+- **Table Whitelist:** Queries can ONLY access `sales`, `v_valid_sales`, or `v_sales_anomalies`. Any query attempting to access internal schemas (like `sqlite_master`) is blocked before running.
+- **Blocked Keywords:** Commands like `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, and user `PRAGMA` calls are rejected.
+- **No Multi-Statements:** Commands separated by semicolons (e.g., `SELECT 1; DROP TABLE sales;`) are rejected.
 
 ---
 
@@ -163,13 +164,14 @@ What the 19 tests check:
 - In the actual app, I only let the LLM handle understanding English questions. I did NOT let the LLM do math. All math is done by SQL in the database so answers are always 100% accurate.
 
 ### Problems I Faced & How I Fixed Them
-1. **Old model didn't exist:** I initially tried `llama-3.3-70b-versatile` on Groq, but got a `model_not_found` error. I ran a script to list available models on my key and switched to `qwen/qwen3.8-27b`, which worked right away.
-2. **Blank answers with reasoning models:** I tested with `openai/gpt-oss-20b`, but it used up all its tokens on internal thinking steps and returned empty SQL. Switching to Qwen solved this.
-3. **Bad data in the CSV:** The raw CSV had 3 problematic rows (TXN0033 was returned, TXN0034 had 0 quantity, and TXN0051 had no price). If you just ran `SUM(price * quantity)`, the totals were wrong. I fixed this by creating `clean.py` and an SQLite view `v_valid_sales` that only includes valid, completed sales.
-4. **Streamlit reloading database repeatedly:** At first, `database.init_db()` ran on every click in Streamlit, re-reading the CSV and writing to disk every time. I fixed it by caching the setup with `@st.cache_resource` and adding a check so it skips re-creating the database if it already exists.
-5. **Database errors showing as success:** Early on, if the database threw an error on a question, the router returned an empty string but marked the status as success. I wrote a `_format_db_response()` helper that checks `db_res.get("success")` and forwards the real error to the user.
+1. **Blank answers with reasoning models:** I tested with `openai/gpt-oss-20b`, but it used up all its tokens on internal thinking steps and returned empty SQL. Switching to Qwen solved this.
+2. **Bad data in the CSV:** The raw CSV had 3 problematic rows (TXN0033 was returned, TXN0034 had 0 quantity, and TXN0051 had no price). If you just ran `SUM(price * quantity)`, the totals were wrong. I fixed this by creating `clean.py` and an SQLite view `v_valid_sales` that only includes valid, completed sales.
+3. **Streamlit reloading database repeatedly:** At first, `database.init_db()` ran on every click in Streamlit, re-reading the CSV and writing to disk every time. I fixed it by caching the setup with `@st.cache_resource` and adding a check so it skips re-creating the database if it already exists.
+4. **Database errors showing as success:** Early on, if the database threw an error on a question, the router returned an empty string but marked the status as success. I wrote a `_format_db_response()` helper that checks `db_res.get("success")` and forwards the real error to the user.
+
 
 ### What I Would Add With One More Day
 1. **Interactive Charts:** Show bar charts and trend lines automatically in Streamlit using Altair or Plotly.
 2. **Chat Memory:** Allow follow-up questions like *"What about for last month?"* without having to re-type the full question.
 3. **Query Caching:** Save answers to common questions in memory so repeated questions answer in 0ms without calling the LLM.
+4. **Dynamic RAG:** Instead of a fixed database, allow the LLM to connect to external data sources (APIs, other databases) to answer questions.
