@@ -27,7 +27,7 @@ A simple AI-powered Business Intelligence tool that lets you ask questions about
 
 ## 🚀 Live Interactive Demo (Start Here!)
 
-Skip the local setup — the entire assistant is live and interactive in your browser right now:
+Skip the local setup — the entire assistant is live and interactive in browser or use swagger api to test:
 
 👉 **[Sales BI Assistant · Streamlit](https://mdsaabiq-rsg-assignment-app-dhfsqc.streamlit.app/)** 👈
 
