@@ -6,10 +6,10 @@ A simple AI-powered Business Intelligence tool that lets you ask questions about
 
 <div align="center">
 
-<a href="https://skillicons.dev">
+<!-- <a href="https://skillicons.dev">
   <img src="https://skillicons.dev/icons?i=py,fastapi,sqlite" /><br/>
   <img src="https://skillicons.dev/icons?i=git,github,bash,linux,postman" />
-</a>
+</a> -->
 
 <br/><br/>
 
