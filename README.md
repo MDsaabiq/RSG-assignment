@@ -94,31 +94,35 @@ Once the server or app is running, you can test open-ended questions to evaluate
 ## 2. How the System Works (Architecture)
 
 ```mermaid
+
 flowchart TD
-    User["User Question<br/>Web or API"]
-    InputCheck["1. Input Check<br/>Sanitize input"]
-    Router{"Routing(Determinstic or LLM(Text-to-SQL))?"}
-    FastTrack["2A. Benchmark<br/>Verified SQL"]
-    AIQuery["2B. Text-to-SQL<br/>Groq query"]
-    SafetyCheck["3. Safety Guard<br/>Read-only mode"]
-    Answer["4. Final Answer<br/>Data and table"]
+    User["User Question<br/>Streamlit or FastAPI"]
+    InputCheck["1. Input Validation<br/>Sanitize and validate input"]
+
+    Router{"Deterministic<br/>benchmark question?"}
+
+    FastTrack["2A. Deterministic Path<br/>Execute verified SQL"]
+
+    AIQuery["2B. AI Path<br/>Groq Text-to-SQL"]
+
+    SafetyCheck["3. SQL Safety Guard<br/>Validate SQL and enforce read-only access"]
+
+    Execute["4. Execute Query<br/>Retrieve database results"]
+
+    Answer["5. Final Answer<br/>Summary and supporting data"]
 
     User --> InputCheck
     InputCheck --> Router
+
     Router -->|Yes| FastTrack
     Router -->|No| AIQuery
-    AIQuery --> SafetyCheck
-    SafetyCheck -.->|Retry| AIQuery
-    FastTrack --> Answer
-    SafetyCheck --> Answer
 
-    style User fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style InputCheck fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
-    style Router fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#ffffff
-    style FastTrack fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ffffff
-    style AIQuery fill:#2e1065,stroke:#a78bfa,stroke-width:2px,color:#ffffff
-    style SafetyCheck fill:#4a044e,stroke:#f472b6,stroke-width:2px,color:#ffffff
-    style Answer fill:#0f172a,stroke:#22c55e,stroke-width:2px,color:#f8fafc
+    FastTrack --> Execute
+    AIQuery --> SafetyCheck
+    SafetyCheck --> Execute
+
+    Execute --> Answer
+
 ```
 
 ### In Plain English:
