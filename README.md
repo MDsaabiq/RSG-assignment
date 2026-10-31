@@ -103,7 +103,7 @@ Once the server or app is running, you can test open-ended questions to evaluate
     "fontSize": "14px",
     "lineColor": "#CBD5E1",
     "textColor": "#E5E7EB",
-    "edgeLabelBackground": "#073371ff"
+    "edgeLabelBackground": "#8d9096ff"
   },
   "flowchart": {
     "nodeSpacing": 40,
