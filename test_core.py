@@ -140,6 +140,22 @@ def test_prohibited_keywords():
         assert is_valid is False
 
 
+def test_unauthorized_table_access_blocked():
+    """Validator blocks access to unauthorized tables or internal schemas."""
+    for q in ["SELECT * FROM sqlite_master", "SELECT * FROM users", "SELECT * FROM passwords"]:
+        is_valid, err = database.validate_sql(q)
+        assert is_valid is False
+        assert "disallowed" in err.lower()
+
+
+def test_readonly_connection_engine_protection():
+    """Verifies that SQLite read-only connection and PRAGMA query_only = ON prevent writes at engine level."""
+    import sqlite3
+    with database.get_readonly_connection() as conn:
+        with pytest.raises(sqlite3.OperationalError):
+            conn.execute("DELETE FROM sales")
+
+
 # ==============================================================================
 # 4. Data Management & Anomaly Segregation
 # ==============================================================================
@@ -154,6 +170,15 @@ def test_data_quality_isolation():
     assert any("RETURNED" in f for f in flags)
     assert any("QUANTITY" in f for f in flags)
     assert any("PRICE" in f for f in flags)
+
+
+def test_deterministic_database_failure_propagation():
+    """Verifies that database failures in deterministic routes propagate errors instead of falsely succeeding."""
+    from agent import _format_db_response
+    mock_db_res = {"success": False, "error": "Simulated disk failure", "rows": [], "columns": []}
+    res = _format_db_response(mock_db_res, "Fallback text")
+    assert res.get("error") == "Simulated disk failure"
+    assert "Database error" in res.get("answer")
 
 
 # ==============================================================================

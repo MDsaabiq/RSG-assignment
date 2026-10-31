@@ -19,12 +19,20 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize database if needed
-database.init_db()
+# Initialize database once per session using Streamlit cache
+@st.cache_resource
+def setup_database():
+    return database.init_db()
+
+setup_database()
 
 # ==============================================================================
 # Sidebar: Benchmark Controls & Database Audit
 # ==============================================================================
+
+@st.cache_data(ttl=300)
+def get_cached_audit():
+    return database.get_data_quality_audit()
 
 with st.sidebar:
     st.header("📊 Sales BI Controls")
@@ -46,7 +54,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("Data Quality Summary")
-    audit_res = database.get_data_quality_audit()
+    audit_res = get_cached_audit()
     if audit_res.get("success", False) and audit_res.get("rows"):
         audit_df = pd.DataFrame(audit_res["rows"])
         st.dataframe(audit_df, use_container_width=True, hide_index=True)

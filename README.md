@@ -1,193 +1,135 @@
-# Mini AI Business Intelligence Assistant
-### AI-Assisted Development Challenge for GET Selection
+# Sales BI Assistant
 
-A resilient, deterministic natural language Business Intelligence Assistant that answers sales performance questions backed by verified relational database queries and LangGraph agentic workflow routing.
-
----
-
-## 1. System Architecture
-
-The application adopts a **Decoupled 3-Tier Architecture** separating data access, agentic workflow orchestration, and client delivery:
-
-```mermaid
-flowchart TD
-    User["Business User / Evaluator"] --> Streamlit["Streamlit UI (app.py)"]
-    User --> FastAPI["REST API (api.py)"]
-    
-    FastAPI --> Agent["LangGraph Agent (agent.py)"]
-    Streamlit --> Agent
-
-    subgraph LangGraphWorkflow["LangGraph State Workflow"]
-        direction TB
-        Node1["Node 1: Input Validation\n(Empty, Null, SQL Injection Guard)"]
-        Node2{"Node 2: Intent Router\n(Benchmark vs Custom)"}
-        Node3A["Node 3A: Deterministic Tools\n(Pre-compiled Benchmark Logic)"]
-        Node3B["Node 3B: Dynamic Text-to-SQL\n(Groq Qwen 2.5 with Schema Context)"]
-        Node4["Node 4: SQL Safety & Execution\n(Read-Only SELECT Validator)"]
-        Node5["Node 5: Response Synthesis\n(Cited Data Figures)"]
-
-        Node1 --> Node2
-        Node2 -->|Matches Q1-Q5| Node3A
-        Node2 -->|Novel Query| Node3B
-        Node3B --> Node4
-        Node4 -->|Syntax Error (Retries < 2)| Node3B
-        Node4 --> Node5
-        Node3A --> Node5
-    end
-
-    Agent --> LangGraphWorkflow
-    Node3A --> DB[(SQLite: sales.db)]
-    Node4 --> DB
-
-    subgraph DatabaseLayer["Data Management (database.py)"]
-        DB --> ViewValid["View: v_valid_sales\n(48 Completed Records)"]
-        DB --> ViewAnomalies["View: v_sales_anomalies\n(3 Flagged Records)"]
-    end
-```
+A mini natural language business intelligence assistant that allows users to ask questions about sales data and receive answers backed by verified database queries. Built with SQLite, LangGraph, FastAPI, and Streamlit.
 
 ---
 
-## 2. Key Technical Concepts (Interview Readiness)
-
-### Why "Vectorless RAG"?
-* **Traditional Vector RAG Flaw:** Vector databases rely on semantic distance (cosine similarity) across text chunks. If asked *"What is the total revenue?"*, vector search returns arbitrary transaction snippets; it cannot calculate sums, averages, or month-over-month differences, forcing the LLM to hallucinate arithmetic.
-* **Vectorless (Structured) RAG:** The assistant retrieves schema metadata, binds natural language intents to deterministic SQL execution over SQLite, and synthesizes answers strictly grounded in actual database results.
-
-### Agentic AI with LangGraph
-Instead of a fragile one-shot prompt, the agent is implemented as a state machine (`langgraph.graph.StateGraph`):
-1. **Input Validation Node:** Rejects null, empty, whitespace, and prompt injection traps.
-2. **Intent Routing Node:** Directs the 5 core challenge questions to deterministic tools for 100% calculation accuracy.
-3. **Dynamic SQL Generation Node:** Injects relational schema to translate ad-hoc inquiries into SQLite queries.
-4. **Safety & Self-Correction Node:** Enforces read-only execution (`SELECT` only) and feeds database syntax errors back to the model for self-healing (bounded to `max_retries = 2`).
-
----
-
-## 3. Challenge Benchmark Questions & Verified Results
-
-All 5 assessment questions are verified deterministically against `v_valid_sales`:
-
-| # | Challenge Question | Status | Verified Metric / Result | Supporting Details |
-| :---: | :--- | :---: | :--- | :--- |
-| **Q1** | *What is the total revenue?* | ✅ Supported | **$1,439,200.00 Net Revenue** | Gross: $1,443,700.00; Discounts: $4,500.00; 48 completed transactions. |
-| **Q2** | *Which product generated the highest revenue?* | ✅ Supported | **'Monitor' ($473,000.00)** | 50 units sold across Electronics category (Desk 2nd: $222,500.00). |
-| **Q3** | *What is the monthly revenue trend?* | ✅ Supported | **6-Month Trend Analyzed** | Jan: $210,250 → Feb: $234,600 (+11.58%) → Mar: $223,900 (-4.56%) → Apr: $240,700 (+7.50%) → May: $318,500 (+32.32%) → Jun: $211,250 (-33.67%). |
-| **Q4** | *Which region generated the highest sales?* | ✅ Supported | **'South' ($411,200.00)** | 13 completed orders (North 2nd: $384,450.00; East 3rd: $346,700.00; West 4th: $296,850.00). |
-| **Q5** | *How did revenue change between two months?* | ✅ Supported | **+$24,350.00 (+11.58%)** | Jan 2026 ($210,250.00) vs Feb 2026 ($234,600.00). Supports arbitrary month pairs. |
-
----
-
-## 4. Data Management & Anomaly Handling
-
-The raw dataset (`ai_bi_assistant_sales_data - GET.csv`) contains 51 transaction records. `clean.py` and `database.py` isolate quality defects to prevent skewed metrics:
-
-* **Clean Completed Records (48 rows):** Assigned `is_valid_sale = 1` and queried via `v_valid_sales`.
-* **Flagged Anomalies (3 rows):**
-  1. `TXN0033` (Monitor): **Status = 'Returned'** (Revenue excluded to prevent counting refunded orders).
-  2. `TXN0034` (Keyboard): **Quantity = 0** (Coerced to 0 revenue; flagged as `ZERO_QUANTITY`).
-  3. `TXN0051` (Laptop Stand): **Unit_price = Missing** (Coerced to 0.0; flagged as `MISSING_UNIT_PRICE`).
-
----
-
-## 5. Security & Sandbox Guardrails
-
-Built specifically to resist evaluation sandbox traps and injection attempts:
-* **Zero Unhandled Crashes:** All entry points handle `None`, `""`, whitespace, and malformed strings gracefully, returning structured `{"status": "error", ...}` payloads.
-* **SQL Injection & DDL Prevention:** `database.validate_sql` rejects all multi-statement queries (e.g. `SELECT 1; DROP TABLE sales;`) and blocks destructive commands (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`, `EXEC`, `PRAGMA`).
-* **Hard Exit Limits:** LangGraph retry edges are bounded (`MAX_SQL_RETRIES = 2`) to prevent infinite recursion.
-* **Defensive Dictionary Access:** All state lookups use `.get()` with safe fallback defaults.
-
----
-
-## 6. Project Structure
-
-```text
-├── data/
-│   ├── ai_bi_assistant_sales_data - GET.csv   # Raw source transaction data
-│   └── cleaned.csv                            # Cleaned and normalized data
-├── question/
-│   └── AI Assisted Development Challenge.docx # Challenge specifications
-├── clean.py         # ETL pipeline: date parsing, anomaly flagging, revenue calculation
-├── database.py      # SQLite ingestion, views, safety validator, deterministic tools
-├── agent.py         # LangGraph workflow (validation, routing, text-to-SQL, synthesis)
-├── api.py           # FastAPI REST API (/query, /health, /schema)
-├── app.py           # Streamlit user interface with chat history & query inspection
-├── test_core.py     # 16 automated pytest unit and integration tests
-├── requirements.txt # Wheel-pinned dependency definitions
-├── .env             # API key configurations (GROQ_API_KEY)
-└── README.md        # Comprehensive solution & architecture documentation
-```
-
----
-
-## 7. Setup & Execution Instructions
+## 1. Setup & How to Run
 
 ### Prerequisites
-* Python 3.10+ (tested on Python 3.13)
-* Windows / Linux / macOS
+- Python 3.10+ (tested on Python 3.13)
+- Windows / macOS / Linux
 
-### 1. Environment Setup
+### Installation
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd Assignment
-
-# Activate virtual environment
+# 1. Activate virtual environment
 .\venv\Scripts\activate          # Windows PowerShell
-# source venv/bin/activate       # Linux/macOS
+# source venv/bin/activate       # Mac/Linux
 
-# Install dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment Variables
-Create or verify your `.env` file in the root directory:
+### Environment Configuration
+Make sure you have a `.env` file in the root folder with your Groq key:
 ```ini
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-### 3. Run Automated Tests
-```bash
-pytest -v test_core.py
-```
-*Expected: 16 passed tests covering benchmarks, edge cases, SQL injection, and API endpoints.*
+### Running the Components
 
-### 4. Run the REST API Backend
-```bash
-python api.py
-# Or: uvicorn api:app --reload --port 8000
-```
-* Access Swagger UI documentation: `http://localhost:8000/docs`
-* Health check: `http://localhost:8000/health`
-* Query endpoint: `POST http://localhost:8000/query` with `{"question": "What is the total revenue?"}`
+- **Streamlit Web UI (Recommended for manual testing):**
+  ```bash
+  streamlit run app.py
+  ```
+  Opens at `http://localhost:8501`. Features quick buttons for all 5 benchmark questions, chat history, tabular data views, and SQL inspection.
 
-### 5. Run the Streamlit Interface
-```bash
-streamlit run app.py
-```
-* Interactive web interface accessible at `http://localhost:8501`.
+- **FastAPI REST Server:**
+  ```bash
+  python api.py
+  ```
+  Runs at `http://localhost:8000`. Test via curl or Postman:
+  ```bash
+  curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d "{\"question\": \"What is the total revenue?\"}"
+  ```
+
+- **Automated Tests:**
+  ```bash
+  pytest -v test_core.py
+  ```
 
 ---
 
-## 8. AI Tools & Development Reflection Report
+## 2. Architecture & Flow
 
-### AI Tools Utilized
-* **Antigravity AI Assistant:** Used for rapid architectural synthesis, exploratory analysis, code structuring, and automated test authoring.
-* **Groq API (`qwen/qwen3.8-27b`):** Selected for sub-second inference latency (~300ms) and structured SQL synthesis.
-* **LangGraph:** Deployed for stateful graph workflow routing and self-correction loops.
+```mermaid
+flowchart TD
+    User["User Query\n(Streamlit or FastAPI)"] --> Val["1. Input Validation Node\n(Empty string, null, and SQL injection checks)"]
+    Val --> Router{"2. Intent Router Node"}
 
-### Problems Encountered & How They Were Debugged
-1. **Model Deprecation / Not Found Error:**
-   * *Issue:* The legacy `llama-3.3-70b-versatile` endpoint returned a `model_not_found` error from Groq.
-   * *Resolution:* Dynamically queried Groq's `client.models.list()`, identified active models (`qwen/qwen3.8-27b`), and benchmarked response quality.
-2. **Reasoning Token Exhaustion:**
-   * *Issue:* Test queries with reasoning-focused models (`openai/gpt-oss-20b`) exhausted token limits within internal reasoning chains, returning blank completion strings.
-   * *Resolution:* Switched to `qwen/qwen3.8-27b` with temperature 0.0, which outputs direct, high-accuracy SQL without consuming tokens in reasoning loops.
-3. **Data Quality Skew on Aggregates:**
-   * *Issue:* Computing raw `SUM(Unit_price * Quantity)` distorted sales figures due to returned transactions (`TXN0033`) and missing unit prices (`TXN0051`).
-   * *Resolution:* Implemented `v_valid_sales` view in SQLite to isolate valid completed orders from anomalies.
+    Router -->|Matches 5 challenge questions| Det["3A. Deterministic SQL Tools\n(100% exact math, zero hallucination)"]
+    Router -->|Custom / novel question| Gen["3B. Text-to-SQL Node\n(Groq Qwen 2.5 + SQLite Schema)"]
 
-### What Would Be Improved With Another Day of Work
-1. **Interactive Visualization Generation:** Integrate automatic Altair or Plotly chart generation inside `app.py` for monthly revenue and category comparisons.
-2. **Semantic Cache:** Implement an SQLite query cache (hashing normalized natural language questions) to achieve instant 0ms responses for recurring user queries.
-3. **Multi-Turn Context:** Extend LangGraph state to track conversation thread memory across multi-turn follow-up questions (e.g., *"What about in the East region?"* following a product query).
+    Gen --> Exec["4. Safety Check & Execution\n(Read-only connection + PRAGMA query_only)"]
+    Exec -->|Syntax error & retries < 2| Gen
 
+    Det --> Synth["5. Response Synthesis\n(Returns text answer + supporting data rows)"]
+    Exec --> Synth
+```
+
+### System Layers
+1. **Data Management (`clean.py`, `database.py`)**:
+   - `clean.py` parses raw dates into `YYYY-MM-DD` and `YYYY-MM`, handles numeric coercion, computes gross/net revenue, and flags data anomalies.
+   - `database.py` creates `sales.db` with two views:
+     - `v_valid_sales`: Contains 48 valid completed transactions. All standard metrics query this view.
+     - `v_sales_anomalies`: Isolates 3 flagged records (returned items, zero quantity, missing unit price).
+   - SQL queries run through `get_readonly_connection()` using SQLite `mode=ro` URI and `PRAGMA query_only = ON`.
+
+2. **Agent Workflow (`agent.py`)**:
+   - Built as a state machine using LangGraph (`StateGraph`).
+   - Node 1 validates inputs against nulls, whitespace, and injection keywords.
+   - Node 2 routes core benchmark questions directly to deterministic database queries.
+   - For novel queries, Node 3 prompts Groq (`qwen/qwen3.8-27b`) with the schema to write safe SQL.
+   - Node 4 validates the query against an allowed table list (`sales`, `v_valid_sales`, `v_sales_anomalies`) and executes it. If SQLite returns a syntax error, it feeds it back to the LLM to self-heal (up to 2 retries).
+
+3. **Interfaces (`app.py`, `api.py`)**:
+   - `api.py`: FastAPI backend with `POST /query`, `GET /health`, and `GET /schema`.
+   - `app.py`: Streamlit frontend with conversation state, supporting data tables, and sidebar controls.
+
+---
+
+## 3. Automated Tests
+
+Run all tests with:
+```bash
+pytest -v test_core.py
+```
+
+The test suite contains **19 unit and integration tests** in `test_core.py`:
+- **Core Analytics (Q1–Q5):** Verifies total revenue ($1,439,200.00 across 48 orders), top product (Monitor with $473,000.00), 6-month trends with MoM percentages, top region (South with $411,200.00), and Jan vs Feb change (+$24,350.00 / +11.58%).
+- **Input Edge Cases:** Verifies that empty strings (`""`), whitespace (`"   "`), and `None` return structured error objects instead of crashing.
+- **SQL Security & Whitelisting:** Verifies that `DROP TABLE`, `DELETE FROM`, multi-statement attacks (`SELECT 1; DROP TABLE...`), and unauthorized tables (`sqlite_master`, `users`) are rejected.
+- **Engine-Level Protection:** Verifies that attempting write operations on the read-only connection raises an `OperationalError`.
+- **API Contracts:** Verifies `GET /health`, `GET /schema`, `POST /query` success (200), and bad input rejection (400).
+
+---
+
+## 4. AI Development Reflection
+
+### Which AI tools I used
+- **GitHub Copilot**: Used for inline code completion, writing repetitive TypedDict schemas for LangGraph state, and drafting test assertion blocks.
+- **Groq API (`qwen/qwen3.8-27b`)**: Used at runtime for natural language text-to-SQL translation and answer synthesis.
+
+### How I used AI during development
+- I used GitHub Copilot to quickly generate boilerplate code (like Pydantic models and repetitive SQLite row conversions).
+- I used LLM prompts to inspect the CSV column distributions and verify table edge cases.
+- In the agent pipeline, I used the LLM strictly where language understanding is needed (interpreting custom questions). For the 5 core business metrics, I routed them to deterministic SQL functions so that arithmetic is 100% reproducible and never hallucinated.
+
+### Problems I encountered
+1. **Model deprecation on Groq:** My first attempt used `llama-3.3-70b-versatile`, but Groq returned a `model_not_found` error because the model was unavailable in the current endpoint.
+2. **Blank responses from reasoning models:** Testing with `openai/gpt-oss-20b` resulted in empty response strings because the model used up its token limit writing internal reasoning chains rather than outputting the SQL.
+3. **Dirty data skewing calculations:** The raw CSV contained 3 bad rows: a returned monitor (`TXN0033`), an order with 0 quantity (`TXN0034`), and an order with a missing price (`TXN0051`). Directly summing raw columns inflated revenue and produced incorrect averages.
+4. **Streamlit reload overhead:** Calling `init_db()` unconditionally at the top of `app.py` caused Streamlit to reload the CSV and rewrite the database on every chat click.
+5. **False positive status on database errors:** If SQLite threw an execution error on a deterministic query, the router caught it but still marked the graph state as successful with an empty answer.
+
+### How I debugged them
+- I ran a script checking `client.models.list()` on Groq, found `qwen/qwen3.8-27b`, and switched to it. It responds in ~300ms and outputs clean SQL without reasoning token bloat.
+- I wrote `clean.py` and created an SQLite view `v_valid_sales` that filters `is_valid_sale = 1 AND Status = 'Completed'`. All business queries target this view so anomalies are segregated.
+- I added a fast-path check in `init_db()` to skip re-reading the CSV if `sales.db` already exists with records, and cached the initialization in `app.py` using `@st.cache_resource`.
+- I added a `_format_db_response()` helper in `agent.py` that verifies `db_res.get("success")` before setting status, properly propagating errors into the graph state.
+- I added defense-in-depth security: keyword validation, table whitelisting, SQLite `mode=ro` URI, and `PRAGMA query_only = ON`.
+
+### What I would improve with another day of work
+1. **Chart Generation:** Auto-generate interactive Plotly or Altair charts in Streamlit whenever a query returns time-series trends or category breakdowns.
+2. **Conversational Memory:** Add multi-turn message history into LangGraph state so users can ask follow-ups (e.g., *"What about in the East region?"*) without repeating the whole context.
+3. **Query Caching:** Add an in-memory cache for common questions so recurring user queries return in 0ms without hitting the LLM API.

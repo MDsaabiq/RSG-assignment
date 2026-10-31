@@ -131,6 +131,20 @@ def input_validation_node(state: AgentState) -> Dict[str, Any]:
     }
 
 
+def _format_db_response(db_res: Dict[str, Any], default_summary: str) -> Dict[str, Any]:
+    """Helper to check database result and propagate errors instead of falsely reporting success."""
+    is_ok = db_res.get("success", False)
+    return {
+        "route": "deterministic",
+        "answer": db_res.get("summary_text", default_summary) if is_ok else f"Database error: {db_res.get('error')}",
+        "supporting_data": db_res.get("rows", []),
+        "columns": db_res.get("columns", []),
+        "sql": db_res.get("query"),
+        "execution_source": "deterministic_tool",
+        "error": None if is_ok else db_res.get("error", "Database query failed")
+    }
+
+
 def intent_router_node(state: AgentState) -> Dict[str, Any]:
     """
     Node 2: Intent Router
@@ -147,16 +161,7 @@ def intent_router_node(state: AgentState) -> Dict[str, Any]:
         or ("how much revenue" in q and "total" in q)
         or q in ["what is the total revenue?", "what is the total revenue"]
     ):
-        db_res = database.get_total_revenue()
-        return {
-            "route": "deterministic",
-            "answer": db_res.get("summary_text", "Total revenue calculated."),
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql": db_res.get("query"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
+        return _format_db_response(database.get_total_revenue(), "Total revenue calculated.")
 
     # Challenge Q2: Top product by revenue
     if (
@@ -164,16 +169,7 @@ def intent_router_node(state: AgentState) -> Dict[str, Any]:
         or ("which product generated the highest revenue" in q)
         or ("top product" in q)
     ):
-        db_res = database.get_top_product(limit=3)
-        return {
-            "route": "deterministic",
-            "answer": db_res.get("summary_text", "Top product identified."),
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql": db_res.get("query"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
+        return _format_db_response(database.get_top_product(limit=3), "Top product identified.")
 
     # Challenge Q3: Monthly revenue trend
     if (
@@ -181,16 +177,7 @@ def intent_router_node(state: AgentState) -> Dict[str, Any]:
         or ("month by month" in q)
         or ("monthly revenue trend" in q)
     ):
-        db_res = database.get_monthly_revenue_trend()
-        return {
-            "route": "deterministic",
-            "answer": db_res.get("summary_text", "Monthly revenue trend calculated."),
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql": db_res.get("query"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
+        return _format_db_response(database.get_monthly_revenue_trend(), "Monthly revenue trend calculated.")
 
     # Challenge Q4: Highest sales region
     if (
@@ -198,16 +185,7 @@ def intent_router_node(state: AgentState) -> Dict[str, Any]:
         or ("which region generated the highest sales" in q)
         or ("top region" in q)
     ):
-        db_res = database.get_top_region(limit=4)
-        return {
-            "route": "deterministic",
-            "answer": db_res.get("summary_text", "Top sales region identified."),
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql": db_res.get("query"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
+        return _format_db_response(database.get_top_region(limit=4), "Top sales region identified.")
 
     # Challenge Q5: Revenue change between two months
     if ("between" in q and ("month" in q or "revenue" in q)) or ("change between" in q):
@@ -229,16 +207,10 @@ def intent_router_node(state: AgentState) -> Dict[str, Any]:
         if len(found_months) >= 2:
             m1, m2 = found_months[0], found_months[1]
 
-        db_res = database.compare_monthly_revenue(m1, m2)
-        return {
-            "route": "deterministic",
-            "answer": db_res.get("summary_text", f"Revenue comparison between {m1} and {m2} completed."),
-            "supporting_data": db_res.get("rows", []),
-            "columns": db_res.get("columns", []),
-            "sql": db_res.get("query"),
-            "execution_source": "deterministic_tool",
-            "error": None
-        }
+        return _format_db_response(
+            database.compare_monthly_revenue(m1, m2),
+            f"Revenue comparison between {m1} and {m2} completed."
+        )
 
     # Route to dynamic SQL generation
     return {

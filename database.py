@@ -20,9 +20,24 @@ RAW_CSV_PATH = os.path.join("data", "ai_bi_assistant_sales_data - GET.csv")
 
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
-    """Returns an SQLite connection configured with Row factory."""
+    """Returns an SQLite read-write connection configured with Row factory (used for ingestion)."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_readonly_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
+    """
+    Returns an SQLite connection in strict read-only mode at the OS/C-library level
+    with PRAGMA query_only = ON as defense in depth against any mutation attempt.
+    """
+    abs_path = os.path.abspath(db_path)
+    # SQLite URI syntax requires forward slashes on Windows
+    norm_path = abs_path.replace("\\", "/")
+    uri = f"file:///{norm_path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only = ON;")
     return conn
 
 
@@ -36,6 +51,29 @@ def init_db(
     Creates table 'sales', view 'v_valid_sales', and view 'v_sales_anomalies'.
     """
     try:
+        # If database already exists and has records, avoid re-reading CSV and re-writing table
+        if os.path.exists(db_path) and not force_reload:
+            try:
+                with get_connection(db_path) as conn:
+                    cursor = conn.cursor()
+                    # Verify sales table and v_valid_sales view exist and have data
+                    cursor.execute("SELECT COUNT(*) FROM sales")
+                    total_count = cursor.fetchone()[0]
+                    cursor.execute("SELECT COUNT(*) FROM v_valid_sales")
+                    valid_count = cursor.fetchone()[0]
+                    if total_count > 0:
+                        return {
+                            "success": True,
+                            "db_path": db_path,
+                            "total_records": total_count,
+                            "valid_records": valid_count,
+                            "anomaly_records": total_count - valid_count,
+                            "error": None
+                        }
+            except Exception:
+                # If table or view is missing or corrupted, fall through to re-create
+                pass
+
         # Check if CSV exists; if not, attempt to run clean.py pipeline
         if not os.path.exists(csv_path):
             if os.path.exists(RAW_CSV_PATH):
@@ -141,6 +179,13 @@ def validate_sql(sql: Optional[str]) -> Tuple[bool, Optional[str]]:
             keyword = pattern.replace(r"\b", "")
             return False, f"Prohibited SQL keyword detected: {keyword}."
 
+    # Restrict queries strictly to expected sales tables and views
+    allowed_tables = {"sales", "v_valid_sales", "v_sales_anomalies"}
+    from_matches = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z_0-9]+)", upper_query)
+    for tbl in from_matches:
+        if tbl.lower() not in allowed_tables:
+            return False, f"Access to table or view '{tbl}' is disallowed."
+
     return True, None
 
 
@@ -183,7 +228,7 @@ def execute_safe_query(
     cleaned_query = sql.strip().rstrip(";")
 
     try:
-        with get_connection(db_path) as conn:
+        with get_readonly_connection(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(cleaned_query)
 

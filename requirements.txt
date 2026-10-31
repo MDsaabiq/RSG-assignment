@@ -14,3 +14,4 @@ langgraph
 pytest
 pymupdf
 fastapi
+uvicorn[standard]
