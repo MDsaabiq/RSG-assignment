@@ -148,65 +148,29 @@ def _format_db_response(db_res: Dict[str, Any], default_summary: str) -> Dict[st
 def intent_router_node(state: AgentState) -> Dict[str, Any]:
     """
     Node 2: Intent Router
-    Evaluates if query matches one of the 5 explicit challenge questions.
-    If matched, calls deterministic database tools (zero hallucination).
-    Otherwise, routes to dynamic SQL generation.
+    Matches only normalized benchmark questions to deterministic tools.
+    Any other question is handled by dynamic text-to-SQL.
     """
-    q = state.get("cleaned_query", "").lower().strip()
+    raw_query = state.get("cleaned_query", "")
+    q = re.sub(r"[^\w\s]", "", raw_query.lower())
+    q = re.sub(r"\s+", " ", q).strip()
 
-    # Challenge Q1: Total revenue
-    if (
-        ("total" in q and "revenue" in q)
-        or ("overall" in q and "revenue" in q)
-        or ("how much revenue" in q and "total" in q)
-        or q in ["what is the total revenue?", "what is the total revenue"]
-    ):
+    # Deterministic routing is intentionally exact after normalization.
+    if q == "what is the total revenue":
         return _format_db_response(database.get_total_revenue(), "Total revenue calculated.")
 
-    # Challenge Q2: Top product by revenue
-    if (
-        ("product" in q and ("highest" in q or "top" in q or "best" in q) and "revenue" in q)
-        or ("which product generated the highest revenue" in q)
-        or ("top product" in q)
-    ):
+    if q == "which product generated the highest revenue":
         return _format_db_response(database.get_top_product(limit=3), "Top product identified.")
 
-    # Challenge Q3: Monthly revenue trend
-    if (
-        ("monthly" in q and ("trend" in q or "revenue" in q or "growth" in q))
-        or ("month by month" in q)
-        or ("monthly revenue trend" in q)
-    ):
+    if q == "what is the monthly revenue trend":
         return _format_db_response(database.get_monthly_revenue_trend(), "Monthly revenue trend calculated.")
 
-    # Challenge Q4: Highest sales region
-    if (
-        ("region" in q and ("highest" in q or "top" in q or "best" in q or "most" in q))
-        or ("which region generated the highest sales" in q)
-        or ("top region" in q)
-    ):
+    if q == "which region generated the highest sales":
         return _format_db_response(database.get_top_region(limit=4), "Top sales region identified.")
 
-    # Challenge Q5: Revenue change between two months
-    if ("between" in q and ("month" in q or "revenue" in q)) or ("change between" in q):
+    if q == "how did revenue change between january and february":
         m1 = "2026-01"
         m2 = "2026-02"
-        month_map = {
-            "jan": "2026-01", "january": "2026-01",
-            "feb": "2026-02", "february": "2026-02",
-            "mar": "2026-03", "march": "2026-03",
-            "apr": "2026-04", "april": "2026-04",
-            "may": "2026-05",
-            "jun": "2026-06", "june": "2026-06"
-        }
-        found_months = []
-        for word, m_val in month_map.items():
-            if word in q and m_val not in found_months:
-                found_months.append(m_val)
-
-        if len(found_months) >= 2:
-            m1, m2 = found_months[0], found_months[1]
-
         return _format_db_response(
             database.compare_monthly_revenue(m1, m2),
             f"Revenue comparison between {m1} and {m2} completed."

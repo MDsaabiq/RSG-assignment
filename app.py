@@ -2,16 +2,18 @@
 """
 Streamlit Web Interface for AI Sales BI Assistant.
 
-Fulfills Assessment Requirement #5:
-- Clean, responsive interface to enter business questions and view results.
-- Displays natural language answers, supporting tabular figures, and SQL query inspectability.
-- Pre-loaded quick-prompt buttons for the 5 assessment benchmark questions.
+A pure frontend client connecting to the deployed FastAPI backend on Render.
+Displays natural language answers, supporting data tables, SQL inspectability,
+and execution source citations (Direct Verified SQL vs Dynamic LLM Text-to-SQL).
 """
 
+import os
+import httpx
 import streamlit as st
 import pandas as pd
-from agent import process_user_query
-import database
+
+# Backend API Configuration (Defaults to Render deployment)
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "https://rsg-assignment.onrender.com").rstrip("/")
 
 st.set_page_config(
     page_title="Sales BI Assistant",
@@ -19,46 +21,97 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize database once per session using Streamlit cache
-@st.cache_resource
-def setup_database():
-    return database.init_db()
 
-setup_database()
+def get_citation(source: str) -> str:
+    """Returns a clear citation badge indicating how the query was resolved."""
+    if source == "deterministic_tool":
+        return "⚡ **Method:** Direct Verified SQL (Deterministic Benchmark Tool - Zero Hallucination)"
+    elif source == "dynamic_sql":
+        return "🤖 **Method:** Dynamic Text-to-SQL (Query Formulated by Groq LLM)"
+    elif source == "input_validation":
+        return "🛡️ **Method:** Blocked by Input Security Guardrail"
+    return f"📌 **Method:** {source}"
+
+
+def query_assistant(question: str) -> dict:
+    """Sends natural language question to the FastAPI backend service."""
+    try:
+        with httpx.Client(timeout=50.0) as client:
+            resp = client.post(f"{BACKEND_API_URL}/query", json={"question": question})
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 400:
+                detail = resp.json().get("detail", {})
+                return {
+                    "status": "error",
+                    "question": question,
+                    "answer": detail.get("answer", "Invalid query."),
+                    "supporting_data": [],
+                    "columns": [],
+                    "sql_executed": None,
+                    "execution_source": "input_validation",
+                    "error": detail.get("error")
+                }
+    except Exception as e:
+        return {
+            "status": "error",
+            "question": question,
+            "answer": f"Unable to reach backend at {BACKEND_API_URL}. If Render is waking up from idle, please retry in a few seconds.",
+            "supporting_data": [],
+            "columns": [],
+            "sql_executed": None,
+            "execution_source": "connection_error",
+            "error": str(e)
+        }
+
 
 # ==============================================================================
-# Sidebar: Benchmark Controls & Database Audit
+# Sidebar: Benchmark Question Bank & Live Service Info
 # ==============================================================================
-
-@st.cache_data(ttl=300)
-def get_cached_audit():
-    return database.get_data_quality_audit()
 
 with st.sidebar:
     st.header("📊 Sales BI Controls")
-    st.markdown("Use quick benchmark questions or enter custom queries below.")
+    st.markdown("Select from the benchmark questions or enter a custom query.")
 
-    st.subheader("Challenge Benchmarks:")
-    benchmark_questions = [
+    st.subheader("Question Bank")
+    question_bank = [
         "What is the total revenue?",
         "Which product generated the highest revenue?",
         "What is the monthly revenue trend?",
         "Which region generated the highest sales?",
-        "How did revenue change between January and February?"
+        "How did revenue change between January and February?",
+        "Which sales channel generated the most revenue?",
+        "what is revenue for TXN0034 Keyboard?",
+        "List all returned or anomalous transactions.",
+        "Compare online and retail revenue."
     ]
 
-    clicked_prompt = None
-    for idx, q_text in enumerate(benchmark_questions, 1):
-        if st.button(f"Q{idx}: {q_text}", key=f"bench_{idx}", use_container_width=True):
-            clicked_prompt = q_text
+    selected_question = st.selectbox(
+        "Choose a benchmark query:",
+        options=question_bank,
+        key="question_bank",
+    )
+    run_selected = st.button(
+        "Run selected question",
+        key="run_selected_question",
+        use_container_width=True,
+    )
 
     st.markdown("---")
-    st.subheader("Data Quality Summary")
-    audit_res = get_cached_audit()
-    if audit_res.get("success", False) and audit_res.get("rows"):
-        audit_df = pd.DataFrame(audit_res["rows"])
-        st.dataframe(audit_df, use_container_width=True, hide_index=True)
-    st.caption("Cleaned dataset: 48 valid transactions, 3 flagged records.")
+    st.subheader("Data Quality Audit")
+    # Clean audit summary of the 51 transactions
+    audit_data = [
+        {"Status": "VALID", "Transactions": 48, "Gross Revenue": "$1,443,700"},
+        {"Status": "STATUS_RETURNED", "Transactions": 1, "Gross Revenue": "$19,000"},
+        {"Status": "ZERO_QUANTITY", "Transactions": 1, "Gross Revenue": "$0"},
+        {"Status": "MISSING_UNIT_PRICE", "Transactions": 1, "Gross Revenue": "$0"},
+    ]
+    st.dataframe(pd.DataFrame(audit_data), use_container_width=True, hide_index=True)
+    st.caption("Total dataset: 51 transactions (48 completed, 3 quarantined anomalies).")
+
+    st.markdown("---")
+    st.subheader("🌐 Service Status")
+    st.markdown(f"**Backend API:** [Render Swagger UI]({BACKEND_API_URL}/docs)")
 
 
 # ==============================================================================
@@ -68,7 +121,7 @@ with st.sidebar:
 st.title("🤖 Sales Business Intelligence Assistant")
 st.markdown(
     "Ask natural language questions about your sales data. "
-    "All answers are deterministically computed and verified against the relational database."
+    "All queries are verified against the relational database with deterministic mathematical grounding."
 )
 
 # Session state initialization
@@ -80,6 +133,10 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+        # Display citation
+        if msg.get("execution_source"):
+            st.caption(get_citation(msg["execution_source"]))
+
         # Display supporting table if available
         if msg.get("supporting_data"):
             with st.expander("📋 Supporting Data Table", expanded=False):
@@ -89,13 +146,11 @@ for msg in st.session_state.messages:
         if msg.get("sql_executed"):
             with st.expander("🛠️ Execution Details & SQL Query", expanded=False):
                 st.code(msg["sql_executed"], language="sql")
-                if msg.get("execution_source"):
-                    st.caption(f"Execution Source: `{msg['execution_source']}`")
 
 
-# Handle input from chat or sidebar quick buttons
+# Handle input from chat or the question bank
 user_input = st.chat_input("Ask a question about sales, products, regions, or trends...")
-prompt_to_process = clicked_prompt if clicked_prompt else user_input
+prompt_to_process = selected_question if run_selected else user_input
 
 if prompt_to_process:
     # 1. Render and record user prompt
@@ -103,10 +158,10 @@ if prompt_to_process:
     with st.chat_message("user"):
         st.markdown(prompt_to_process)
 
-    # 2. Process query through LangGraph Agent
+    # 2. Process query through backend API
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing sales database..."):
-            result = process_user_query(prompt_to_process)
+        with st.spinner("Analyzing sales database via backend..."):
+            result = query_assistant(prompt_to_process)
 
             answer = result.get("answer", "No response generated.")
             supporting_data = result.get("supporting_data", [])
@@ -120,7 +175,11 @@ if prompt_to_process:
             else:
                 st.markdown(answer)
 
-            # Render supporting data
+            # Render citation
+            if source:
+                st.caption(get_citation(source))
+
+            # Render supporting data table
             if supporting_data:
                 with st.expander("📋 Supporting Data Table", expanded=True):
                     st.dataframe(pd.DataFrame(supporting_data), use_container_width=True)
@@ -129,7 +188,6 @@ if prompt_to_process:
             if sql_executed:
                 with st.expander("🛠️ Execution Details & SQL Query", expanded=False):
                     st.code(sql_executed, language="sql")
-                    st.caption(f"Execution Source: `{source}`")
 
     # 3. Save assistant message to session state
     st.session_state.messages.append({
@@ -139,4 +197,3 @@ if prompt_to_process:
         "sql_executed": sql_executed,
         "execution_source": source
     })
-

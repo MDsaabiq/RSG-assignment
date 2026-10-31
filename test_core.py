@@ -57,22 +57,19 @@ def test_total_revenue_response_contains_verified_figures():
 def test_custom_question_uses_dynamic_sql_and_returns_real_data():
     """A non-benchmark question uses the dynamic SQL path."""
     sql = (
-        "SELECT Sales_channel, ROUND(SUM(net_revenue), 2) AS total_revenue "
-        "FROM v_valid_sales GROUP BY Sales_channel ORDER BY total_revenue DESC;"
+        "SELECT Product, ROUND(SUM(net_revenue), 2) AS total_revenue "
+        "FROM v_valid_sales WHERE Product = 'Monitor' GROUP BY Product;"
     )
     fake_client = FakeGroqClient(
         sql,
-        "Online generated the most revenue.",
+        "Monitor generated $473,000 in revenue.",
     )
 
     with patch("agent.get_groq_client", return_value=fake_client):
-        body = successful_query("Which sales channel generated the most revenue?")
+        body = successful_query("What is the total revenue for the Monitor product?")
 
     assert body["execution_source"] == "dynamic_sql"
-    assert body["supporting_data"][0] == {
-        "Sales_channel": "Online",
-        "total_revenue": 746750.0,
-    }
+    assert body["supporting_data"][0] == {"Product": "Monitor", "total_revenue": 473000.0}
 
 
 def test_invalid_questions_return_http_400():

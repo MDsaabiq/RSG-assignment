@@ -4,6 +4,15 @@ A simple AI-powered Business Intelligence tool that lets you ask questions about
 
 ### ⚙️ Tech Stack
 
+<div align="center">
+
+<a href="https://skillicons.dev">
+  <img src="https://skillicons.dev/icons?i=py,fastapi,sqlite" /><br/>
+  <img src="https://skillicons.dev/icons?i=git,github,bash,linux,postman" />
+</a>
+
+<br/><br/>
+
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
@@ -11,6 +20,8 @@ A simple AI-powered Business Intelligence tool that lets you ask questions about
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)
 ![Groq](https://img.shields.io/badge/Groq-F55036?style=for-the-badge&logo=groq&logoColor=white)
 ![Pytest](https://img.shields.io/badge/Pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
+
+</div>
 
 ---
 
@@ -62,7 +73,9 @@ GROQ_API_KEY=your_key_here
   ```bash
   streamlit run app.py
   ```
-  Open `http://localhost:8501`. You will see quick-click buttons for the 5 challenge questions, a chat box for custom questions, and data tables with SQL details.
+  Open `http://localhost:8501`. You will see a question-bank dropdown
+  containing the 5 benchmark questions and 3 custom examples, a chat box for
+  custom questions, and data tables with SQL details.
 
 - **FastAPI Server:**
   ```bash
@@ -102,35 +115,32 @@ Once the server or app is running, you can test open-ended questions to evaluate
 ## 2. How the System Works (Architecture)
 
 ```mermaid
-
-
 %%{init: {
   "theme": "base",
   "themeVariables": {
-    "fontFamily": "Arial",
-    "fontSize": "14px",
-    "lineColor": "#CBD5E1",
-    "textColor": "#E5E7EB",
-    "edgeLabelBackground": "#8d9096ff"
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    "lineColor": "#64748B",
+    "textColor": "#1E293B",
+    "edgeLabelBackground": "#F1F5F9"
   },
   "flowchart": {
-    "nodeSpacing": 40,
-    "rankSpacing": 40,
+    "nodeSpacing": 30,
+    "rankSpacing": 35,
     "curve": "basis"
   }
 }}%%
 
 flowchart TD
-    A["User Question<br/>Streamlit / FastAPI"]
-    B["1. Input Validation<br/>Clean query"]
-    C{"Routing"}
+    A["&nbsp;&nbsp;&nbsp;&nbsp;User Question&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Chat / API&nbsp;&nbsp;"]
+    B["&nbsp;&nbsp;&nbsp;&nbsp;1. Input Check&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Sanitize query&nbsp;&nbsp;"]
+    C{"&nbsp;&nbsp;Benchmark?&nbsp;&nbsp;"}
 
-    D["2A. Deterministic<br/>Verified SQL"]
-    E["2B. AI Path<br/>Groq Text-to-SQL"]
+    D["&nbsp;&nbsp;&nbsp;&nbsp;2A. Fixed SQL&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Zero Hallucination&nbsp;&nbsp;"]
+    E["&nbsp;&nbsp;&nbsp;&nbsp;2B. LLM Agent&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Groq Text-to-SQL&nbsp;&nbsp;"]
 
-    F["3. SQL Safety<br/>Read-only checks"]
-    G["4. SQLite<br/>Execute query"]
-    H["5. Final Answer<br/>Summary + data"]
+    F["&nbsp;&nbsp;&nbsp;&nbsp;3. Read-Only Guard&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;PRAGMA query_only&nbsp;&nbsp;"]
+    G["&nbsp;&nbsp;&nbsp;&nbsp;4. SQLite Engine&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Execute & Fetch&nbsp;&nbsp;"]
+    H["&nbsp;&nbsp;&nbsp;&nbsp;5. Response Formatter&nbsp;&nbsp;&nbsp;&nbsp;<br/>&nbsp;&nbsp;Answer & Table&nbsp;&nbsp;"]
 
     A --> B
     B --> C
@@ -159,11 +169,9 @@ flowchart TD
     class G database
     class H output
 
-    linkStyle 0,1,4,5,6,7 stroke:#CBD5E1,stroke-width:2px
-    linkStyle 2 stroke:#22C55E,stroke-width:2.5px
-    linkStyle 3 stroke:#A78BFA,stroke-width:2.5px
-
-
+    linkStyle 0,1,4,5,6,7 stroke:#94A3B8,stroke-width:2px
+    linkStyle 2 stroke:#16A34A,stroke-width:2.5px
+    linkStyle 3 stroke:#7C3AED,stroke-width:2.5px
 ```
 
 ### In Plain English:
@@ -287,3 +295,4 @@ tested separately through the [Render Swagger UI](https://rsg-assignment.onrende
 2. **Chat Memory:** Allow follow-up questions like *"What about for last month?"* without having to re-type the full question.
 3. **Query Caching:** Save answers to common questions in memory so repeated questions answer in 0ms without calling the LLM.
 4. **Dynamic RAG:** Instead of a fixed database, allow the LLM to connect to external data sources (APIs, other databases) to answer questions.
+5. More robust routing for text to sql 
