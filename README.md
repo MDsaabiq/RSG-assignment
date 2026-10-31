@@ -97,7 +97,7 @@ Once the server or app is running, you can test open-ended questions to evaluate
 flowchart TD
     User["User Question<br/>Web or API"]
     InputCheck["1. Input Check<br/>Sanitize input"]
-    Router{"Benchmark<br/>Q1 - Q5?"}
+    Router{"Routing(Determinstic or LLM(Text-to-SQL))?"}
     FastTrack["2A. Benchmark<br/>Verified SQL"]
     AIQuery["2B. Text-to-SQL<br/>Groq query"]
     SafetyCheck["3. Safety Guard<br/>Read-only mode"]
